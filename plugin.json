@@ -1,0 +1,74 @@
+{
+  "id": "simpleedit.database",
+  "name": {
+    "en": "Database",
+    "fr": "Base de données"
+  },
+  "version": "1.0.0",
+  "api": 1,
+  "description": {
+    "en": "PostgreSQL, MySQL / MariaDB and SQLite (through SSH and TLS): the tree of a data source, its tables in tabs to filter, sort and edit, a SQL console with completion, the table designer, the ER diagram, import, export, copy, backup and health",
+    "fr": "PostgreSQL, MySQL / MariaDB et SQLite (via SSH et TLS) : l'arbre d'une source, ses tables en onglets à filtrer, trier et modifier, une console SQL avec complétion, le concepteur de tables, le diagramme ER, import, export, copie, sauvegarde et santé"
+  },
+  "author": "SimpleEdit",
+  "repository": "simple-edit-app/plugin-database",
+  "license": "MIT",
+  "command": [
+    "bin/database"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "id": "database.show",
+        "title": {
+          "en": "Database: Show",
+          "fr": "Base de données : afficher"
+        }
+      },
+      {
+        "id": "database.console",
+        "title": {
+          "en": "Database: SQL Console",
+          "fr": "Base de données : console SQL"
+        }
+      },
+      {
+        "id": "database.add",
+        "title": {
+          "en": "Database: Add a Data Source",
+          "fr": "Base de données : ajouter une source"
+        }
+      },
+      {
+        "id": "database.run_file",
+        "title": {
+          "en": "Database: Run the SQL of the File",
+          "fr": "Base de données : exécuter le SQL du fichier"
+        },
+        "menus": [
+          "editor"
+        ]
+      }
+    ],
+    "panels": [
+      {
+        "id": "database",
+        "title": {
+          "en": "Database",
+          "fr": "Base de données"
+        },
+        "icon": "",
+        "location": "sidebar"
+      },
+      {
+        "id": "console",
+        "title": {
+          "en": "SQL Console",
+          "fr": "Console SQL"
+        },
+        "icon": "",
+        "location": "bottom"
+      }
+    ]
+  }
+}

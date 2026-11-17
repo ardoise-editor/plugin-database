@@ -1,0 +1,59 @@
+[package]
+name = "simpleedit-database"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.90"
+publish = false
+description = "The Database plugin of SimpleEdit"
+license = "MIT"
+
+[[bin]]
+name = "database"
+path = "src/main.rs"
+
+# The drivers: one program for each database, started for each operation.
+[[bin]]
+name = "simpleedit-db-postgres"
+path = "drivers/postgres/main.rs"
+
+[[bin]]
+name = "simpleedit-db-sqlite"
+path = "drivers/sqlite/main.rs"
+
+[[bin]]
+name = "simpleedit-db-mysql"
+path = "drivers/mysql/main.rs"
+
+[dependencies]
+simpleedit-plugin = { git = "https://github.com/simple-edit-app/plugin-sdk", tag = "v0.9.3" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision"] }
+rust-i18n = "3"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "process", "io-util", "time", "sync", "fs", "macros"] }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+sqlformat = "0.5.0"
+rust_xlsxwriter = "0.102.0"
+regex = "1"
+tempfile = "3"
+sha2 = "0.10"
+postgres = { version = "0.19", default-features = false }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-postgres-rustls = "0.14.0"
+rustls-native-certs = "0.8.5"
+rusqlite = { version = "0.41", features = ["bundled", "hooks"] }
+mysql = { version = "28", default-features = false, features = ["minimal-rust", "rustls-tls-ring"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", default-features = false, features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", default-features = false, features = ["sync-secret-service", "crypto-rust", "vendored"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[profile.release]
+strip = true
+lto = true
+
+[dev-dependencies]
