@@ -7,6 +7,8 @@ mod database;
 mod db_tools;
 mod db_tree;
 mod table_admin;
+#[cfg(test)]
+mod tests;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -17,6 +19,20 @@ pub use crate::task::{Effect, Task};
 #[derive(Debug, Clone)]
 pub enum Message {
     Db(DbMsg),
+}
+
+/// A window of the tool (each in a tab of its own).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Window {
+    Dialog,
+    Designer,
+    Health,
+    Import,
+    Copy,
+    Backup,
+    /// A text, the linked rows, a new schema, a question, an SSH key.
+    Text,
+    Diagram,
 }
 
 pub struct App {
@@ -49,6 +65,51 @@ impl App {
             mod_alt: false,
             effects: Vec::new(),
             diagram: None,
+        }
+    }
+
+    /// Handles a message (what the editor did, or the answer of a task).
+    pub fn update(&mut self, message: Message) -> Task<Message> {
+        let Message::Db(msg) = message;
+        self.db_message(msg)
+    }
+
+    /// Closes a window, unless it is working (it stays then): whether it
+    /// closed.
+    pub fn close_window(&mut self, window: Window) -> bool {
+        use crate::database::designer::Load;
+        let db = &mut self.db;
+        match window {
+            Window::Dialog => db.dialog.take().is_some(),
+            Window::Designer
+                if db
+                    .designer
+                    .as_ref()
+                    .is_some_and(|d| d.load == Load::Running) =>
+            {
+                false
+            }
+            Window::Designer => db.designer.take().is_some(),
+            Window::Health => db.health.take().is_some(),
+            Window::Import if db.import.as_ref().is_some_and(|i| i.running) => false,
+            Window::Import => db.import.take().is_some(),
+            Window::Copy if db.copy_table.as_ref().is_some_and(|c| c.running) => false,
+            Window::Copy => db.copy_table.take().is_some(),
+            Window::Backup if db.backup.as_ref().is_some_and(|b| b.running) => false,
+            Window::Backup => db.backup.take().is_some(),
+            Window::Text => {
+                if db.new_schema.as_ref().is_some_and(|n| n.running)
+                    || db.confirm.as_ref().is_some_and(|c| c.running)
+                {
+                    return false;
+                }
+                db.text.take().is_some()
+                    | db.links.take().is_some()
+                    | db.new_schema.take().is_some()
+                    | db.confirm.take().is_some()
+                    | db.ssh_trust.take().is_some()
+            }
+            Window::Diagram => self.diagram.take().is_some(),
         }
     }
 

@@ -226,10 +226,13 @@ impl App {
             GridEvent::Open { row, col } => self.db_message(DbMsg::Edit(path, row, real(col))),
             GridEvent::Edit { value } => self.db_message(DbMsg::EditInput(path, value)),
             GridEvent::Commit => self.db_message(DbMsg::EditCommit(path)),
+            // Escape: the date picker, the cell being typed in, or the form
+            // goes, in that order.
             GridEvent::Cancel => {
                 if let Some(tab) = self.db_tabs.get_mut(&path) {
-                    tab.editing = None;
-                    tab.picker = None;
+                    let _ = tab.picker.take().is_some()
+                        || tab.editing.take().is_some()
+                        || tab.form.take().is_some();
                 }
                 Task::none()
             }
@@ -263,8 +266,20 @@ impl App {
                 (None, None) => Task::none(),
             },
             GridEvent::Paste { text } => self.db_message(DbMsg::Paste(path, Some(text))),
+            // The row of the cursor is marked deleted (a new one goes), and
+            // the cursor moves on to the next row.
             GridEvent::Delete => match tab.selected {
-                Some((row, _)) if tab.editable() => self.db_message(DbMsg::DeleteRow(path, row)),
+                Some((row, col)) if tab.editable() => {
+                    let task = self.db_message(DbMsg::DeleteRow(path.clone(), row));
+                    if let Some(tab) = self.db_tabs.get_mut(&path) {
+                        let rows = tab.page.as_ref().map_or(0, |p| tab.pending.rows(p));
+                        if row + 1 < rows {
+                            tab.selected = Some((row + 1, col));
+                            tab.anchor = None;
+                        }
+                    }
+                    task
+                }
                 _ => Task::none(),
             },
         }

@@ -981,6 +981,20 @@ pub struct Done<T> {
 }
 
 impl<T> Done<T> {
+    /// A value, without anything run (for what is made by hand).
+    #[cfg(test)]
+    pub fn ok(value: T) -> Self {
+        Done {
+            result: Ok(value),
+            executed: Vec::new(),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn err(error: impl Into<String>) -> Self {
+        Done::failed(error.into())
+    }
+
     pub fn failed(error: String) -> Self {
         Done {
             result: Err(error),

@@ -21,7 +21,7 @@ use simpleedit_plugin::ui::{
 };
 use simpleedit_plugin::{run as run_plugin, Host, Plugin};
 
-use crate::app::{App, Effect, Message};
+use crate::app::{App, Effect, Message, Window};
 use crate::database::DbMsg;
 
 pub const DIAGRAM: &str = "diagram";
@@ -236,8 +236,7 @@ impl Shared {
         {
             let task = {
                 let mut state = lock(&self.state);
-                let Message::Db(msg) = message;
-                let task = state.app.db_message(msg);
+                let task = state.app.update(message);
                 effects.append(&mut state.app.effects);
                 task
             };
@@ -393,16 +392,17 @@ fn window(ui: &mut Ui, app: &App, id: &str) -> Option<Node> {
     }
 }
 
-/// Closing a window's tab is giving it up, as its Close button would.
-fn closed(id: &str) -> Option<DbMsg> {
+/// The window a tab stands for.
+fn window_of(id: &str) -> Option<Window> {
     Some(match id {
-        DIALOG => DbMsg::CloseDialog,
-        DESIGNER => DbMsg::Designer(crate::database::DesignerMsg::Close),
-        HEALTH => DbMsg::HealthClose,
-        IMPORT => DbMsg::ImportClose,
-        COPY => DbMsg::CopyClose,
-        BACKUP => DbMsg::BackupClose,
-        TEXT => DbMsg::TextClose,
+        DIALOG => Window::Dialog,
+        DESIGNER => Window::Designer,
+        HEALTH => Window::Health,
+        IMPORT => Window::Import,
+        COPY => Window::Copy,
+        BACKUP => Window::Backup,
+        TEXT => Window::Text,
+        DIAGRAM => Window::Diagram,
         _ => return None,
     })
 }
@@ -521,12 +521,12 @@ impl Plugin for DbPlugin {
             shared.render();
             return;
         }
+        // A window closed with its tab: it goes, unless it is working
+        // (its tab comes back at the next drawing).
         if was_open {
-            if tab == DIAGRAM {
-                lock(&shared.state).app.diagram = None;
+            if let Some(window) = window_of(tab) {
+                lock(&shared.state).app.close_window(window);
                 shared.render();
-            } else if let Some(msg) = closed(tab) {
-                shared.dispatch(Message::Db(msg));
             }
         }
     }
