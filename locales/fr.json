@@ -231,6 +231,7 @@
   "db.log_rows": "%{n} lignes",
   "db.log_search": "Chercher dans l'historique…",
   "db.matview_drop": "Supprimer la vue matérialisée (DROP)…",
+  "db.months": "Janvier,Février,Mars,Avril,Mai,Juin,Juillet,Août,Septembre,Octobre,Novembre,Décembre",
   "db.new_schema": "Nouveau schéma…",
   "db.new_schema_name": "Nom du schéma",
   "db.new_schema_title": "Nouveau schéma",
@@ -356,6 +357,7 @@
   "db.tx_open": "Transaction ouverte",
   "db.tx_rollback": "Annuler",
   "db.view_drop": "Supprimer la vue (DROP)…",
+  "db.weekdays": "Lu,Ma,Me,Je,Ve,Sa,Di",
   "db.where_hint": "condition, par exemple prix > 10 AND nom LIKE 'a%'",
   "sidebar.database": "Base de données"
 }

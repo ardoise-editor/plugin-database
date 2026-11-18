@@ -231,6 +231,7 @@
   "db.log_rows": "%{n} rows",
   "db.log_search": "Search the history…",
   "db.matview_drop": "Drop the materialized view…",
+  "db.months": "January,February,March,April,May,June,July,August,September,October,November,December",
   "db.new_schema": "New schema…",
   "db.new_schema_name": "Name of the schema",
   "db.new_schema_title": "New schema",
@@ -356,6 +357,7 @@
   "db.tx_open": "Transaction open",
   "db.tx_rollback": "Rollback",
   "db.view_drop": "Drop the view…",
+  "db.weekdays": "Mo,Tu,We,Th,Fr,Sa,Su",
   "db.where_hint": "condition, for example price > 10 AND name LIKE 'a%'",
   "sidebar.database": "Database"
 }

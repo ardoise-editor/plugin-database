@@ -5,7 +5,6 @@
 
 use std::path::Path;
 
-use chrono::Datelike;
 use simpleedit_plugin::ui::{
     column, grid, row, scroll, separator, text, GridCell, GridColumn, GridEditing, GridEvent,
     GridRow, GridSelection, MenuItem, Node, RowState, TextStyle,
@@ -458,9 +457,12 @@ fn date_picker(ui: &mut Ui, path: &Path, picker: &crate::database::grid::Picker)
     let owned = || path.to_path_buf();
     let mut out = Vec::new();
     if picker.kind.has_date() {
-        let month = chrono::NaiveDate::from_ymd_opt(picker.year, picker.month, 1)
-            .map(|d| d.format("%B %Y").to_string())
+        let months = t!("db.months").to_string();
+        let name = months
+            .split(',')
+            .nth(picker.month as usize - 1)
             .unwrap_or_default();
+        let month = format!("{name} {}", picker.year);
         out.push(
             row([
                 ui.tool("‹", DbMsg::PickerShift(owned(), -1)),
@@ -470,7 +472,14 @@ fn date_picker(ui: &mut Ui, path: &Path, picker: &crate::database::grid::Picker)
             ])
             .spacing(6.0),
         );
-        // The weeks of the month, Monday first.
+        // The weeks of the month, Monday first, under the names of the days.
+        let weekdays = t!("db.weekdays").to_string();
+        out.push(
+            row(weekdays
+                .split(',')
+                .map(|d| text(format!("{d:>2}")).style(TextStyle::Muted)))
+            .spacing(8.0),
+        );
         let first = picker.first_weekday() as usize;
         let days = picker.days_in_month() as usize;
         let mut cells: Vec<Node> = (0..first).map(|_| text("   ")).collect();
@@ -488,7 +497,6 @@ fn date_picker(ui: &mut Ui, path: &Path, picker: &crate::database::grid::Picker)
             weeks.push(row(it.by_ref().take(7)).spacing(2.0));
         }
         out.push(column(weeks).spacing(2.0));
-        let _ = chrono::Local::now().year();
     }
     if picker.kind.has_time() {
         let field = |ui: &mut Ui, id: &str, value: &str, part: TimePart| {

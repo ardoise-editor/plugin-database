@@ -21,3 +21,29 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
+
+  drivers-live:
+    name: Database drivers (MySQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: secret
+          MYSQL_DATABASE: shop
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -psecret" --health-interval 5s
+          --health-timeout 5s --health-retries 20
+    env:
+      SIMPLEEDIT_TEST_MYSQL: 127.0.0.1:3306:root:secret:shop
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      # The PostgreSQL live tests need a seeded `shop` database (customers,
+      # a `sales` schema…): they are run by hand against one, see the
+      # comments of `live_postgres_is_read_through_the_driver`.
+      - run: cargo test --test sql_drivers
