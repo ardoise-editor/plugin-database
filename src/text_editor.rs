@@ -115,8 +115,8 @@ impl Content {
     pub fn selection(&self) -> Option<String> {
         let (a, b) = self.ordered()?;
         let mut out = String::new();
-        for line in a.line..=b.line {
-            let text = &self.lines[line];
+        let shown = self.lines.iter().enumerate().take(b.line + 1).skip(a.line);
+        for (line, text) in shown {
             let from = if line == a.line { a.column } else { 0 };
             let to = if line == b.line {
                 b.column
