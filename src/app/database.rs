@@ -1658,6 +1658,10 @@ impl App {
                 self.db.console.show_internal = on;
                 Task::none()
             }
+            DbMsg::SelectLog(at) => {
+                self.db.console.selected_log = Some(at);
+                Task::none()
+            }
             DbMsg::CopyLog(at, what) => {
                 let Some(entry) = self.db.console.log.get(at) else {
                     return Task::none();

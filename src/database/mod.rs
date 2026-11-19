@@ -308,6 +308,8 @@ pub enum DbMsg {
     BindCancel,
     ClearLog,
     CopyLog(usize, LogCopy),
+    /// An entry of the log clicked: Ctrl+C copies its SQL.
+    SelectLog(usize),
     /// Shows or hides what the driver runs to know the database.
     ShowInternal(bool),
     /// The text of the console's editor, as typed in the editor's panel.

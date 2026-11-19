@@ -73,6 +73,12 @@ impl Ui {
         }
     }
 
+    /// The id a message has.
+    #[cfg(test)]
+    fn act_of(&self, msg: &DbMsg) -> String {
+        id_of(msg)
+    }
+
     /// An id that sends this message.
     pub fn act(&mut self, msg: DbMsg) -> String {
         let id = id_of(&msg);
@@ -636,5 +642,73 @@ mod tests {
             value: Some(serde_json::json!("users")),
         };
         assert!(matches!(a.message(&event), Some(DbMsg::TreeFilter(t)) if t == "users"));
+    }
+
+    /// The buttons and menu items that carry a key, as `(label, key)`.
+    fn keyed(node: &serde_json::Value, out: &mut Vec<(String, String)>) {
+        if let (Some(label), Some(key)) = (node["label"].as_str(), node["key"].as_str()) {
+            out.push((label.to_string(), key.to_string()));
+        }
+        match node {
+            serde_json::Value::Object(map) => map.values().for_each(|v| keyed(v, out)),
+            serde_json::Value::Array(list) => list.iter().for_each(|v| keyed(v, out)),
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn f4_opens_the_form_and_ctrl_c_copies_the_sql_of_the_entry_clicked() {
+        use crate::app::Message;
+        use crate::database::console::{ConsoleTab, LogEntry};
+        let tab =
+            crate::database::TableTab::new(1, "shop".into(), "public".into(), "t".into(), 100);
+        let menu = serde_json::to_value(table::menu(&tab)).unwrap();
+        let mut found = Vec::new();
+        keyed(&menu, &mut found);
+        assert_eq!(
+            found,
+            vec![(t!("db.form_open").to_string(), "F4".to_string())]
+        );
+
+        let mut app = App::new();
+        app.db.console.open = true;
+        app.db.console.tab = ConsoleTab::Log;
+        for sql in ["SELECT 1", "SELECT 2"] {
+            app.db.console.log.push(LogEntry {
+                time: "10:00:00".into(),
+                connection: "shop".into(),
+                sql: sql.into(),
+                ms: 1,
+                rows: None,
+                error: None,
+                internal: false,
+            });
+        }
+        let shown = |app: &App| {
+            let mut ui = Ui::new(false);
+            let node = console::view(&mut ui, app);
+            let mut found = Vec::new();
+            keyed(&serde_json::to_value(&node).unwrap(), &mut found);
+            (ui, node, found)
+        };
+        let (ui, node, found) = shown(&app);
+        assert!(found.is_empty(), "nothing clicked: no key");
+        // A click on the SQL of the second entry.
+        let json = serde_json::to_value(&node).unwrap().to_string();
+        let id = ui.act_of(&DbMsg::SelectLog(1));
+        assert!(json.contains(&id));
+        let event = UiEvent {
+            panel: "console".into(),
+            action: "log_entry".into(),
+            value: Some(serde_json::json!(id)),
+        };
+        let msg = ui.row_message(&event).unwrap();
+        assert!(matches!(msg, DbMsg::SelectLog(1)));
+        let _ = app.update(Message::Db(msg));
+        let (_, _, found) = shown(&app);
+        assert_eq!(
+            found,
+            vec![(t!("db.log_copy_sql").to_string(), "Ctrl+C".to_string())]
+        );
     }
 }

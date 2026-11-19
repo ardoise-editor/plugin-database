@@ -2246,7 +2246,7 @@ checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
 
 [[package]]
 name = "simpleedit-database"
-version = "1.0.1"
+version = "1.1.0"
 dependencies = [
  "chrono",
  "keyring",
@@ -2271,8 +2271,8 @@ dependencies = [
 
 [[package]]
 name = "simpleedit-plugin"
-version = "0.9.3"
-source = "git+https://github.com/simple-edit-app/plugin-sdk?tag=v0.9.3#883235275182191bd70408b34795b0571aa039f2"
+version = "0.10.0"
+source = "git+https://github.com/simple-edit-app/plugin-sdk?tag=v0.10.0#a4401640aff448eb718834882b3597fbfc2dcc93"
 dependencies = [
  "serde",
  "serde_json",

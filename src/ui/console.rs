@@ -141,10 +141,20 @@ fn queries(ui: &mut Ui, app: &App) -> Node {
         }
     }
     tabs.push(ui.tool("+", DbMsg::NewConsole));
-    let editor = ui
+    let mut editor = ui
         .editor("sql", &c.editor.text(), "sql", DbMsg::SqlText)
         .with_completion()
-        .height(220.0);
+        .height(220.0)
+        // The statement "Run" would run is framed by the editor.
+        .regions(c.statement_regions());
+    // The word the server blamed, underlined.
+    if let Some(mark) = &c.error_mark {
+        editor = editor.mark(simpleedit_plugin::ui::EditorMark {
+            line: mark.line,
+            column: mark.column,
+            len: mark.len,
+        });
+    }
     let status: Node = if let Some(binds) = &c.binds {
         let mut line = vec![text(t!("db.bind_title").to_string()).style(TextStyle::Bold)];
         for (at, name) in binds.names.iter().enumerate() {
@@ -238,10 +248,17 @@ fn log(ui: &mut Ui, app: &App) -> Node {
             );
         }
         head.push(ui.tool(t!("db.log_reuse").to_string(), DbMsg::LogReuse(at)));
-        head.push(ui.tool(
+        let picked = c.selected_log == Some(at);
+        let copy_sql = ui.tool(
             t!("db.log_copy_sql").to_string(),
             DbMsg::CopyLog(at, LogCopy::Sql),
-        ));
+        );
+        // The entry clicked: Cmd/Ctrl+C copies its SQL.
+        head.push(if picked {
+            copy_sql.key("Ctrl+C")
+        } else {
+            copy_sql
+        });
         head.push(ui.tool(
             t!("db.log_copy_entry").to_string(),
             DbMsg::CopyLog(at, LogCopy::Entry),
@@ -253,7 +270,23 @@ fn log(ui: &mut Ui, app: &App) -> Node {
             ));
         }
         list.push(row(head).spacing(6.0));
-        list.push(text(entry.sql.clone()).style(TextStyle::Mono));
+        // A click on the SQL picks the entry.
+        let mut sql = simpleedit_plugin::ui::list(
+            "log_entry",
+            [simpleedit_plugin::ui::item(
+                ui.act(DbMsg::SelectLog(at)),
+                entry.sql.clone(),
+            )],
+        );
+        if picked {
+            if let Node::List {
+                selected, items, ..
+            } = &mut sql
+            {
+                *selected = items.first().map(|i| i.id.clone());
+            }
+        }
+        list.push(sql);
         if let Some(error) = &entry.error {
             list.push(text(error.clone()).style(TextStyle::Error));
         }

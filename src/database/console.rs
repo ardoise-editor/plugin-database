@@ -587,7 +587,18 @@ impl Console {
     }
 }
 
-impl Console {}
+impl Console {
+    /// The lines (from 0, both ends in) of each statement of the text, for
+    /// the editor to frame the one "Run" would run.
+    pub fn statement_regions(&self) -> Vec<[usize; 2]> {
+        let text = self.editor.text();
+        let lines = |offset: usize| text[..offset].matches('\n').count();
+        split_statements(&text, self.dialect)
+            .iter()
+            .map(|span| [lines(span.start), lines(span.end)])
+            .collect()
+    }
+}
 
 // ------------------------------------------------------------ the statements
 
@@ -828,6 +839,16 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn the_lines_of_each_statement_are_given_to_be_framed() {
+        let mut console = Console::load();
+        console.editor =
+            text_editor::Content::with_text("SELECT 1;\n\nSELECT a,\n  b\nFROM t;\nSELECT 3");
+        assert_eq!(console.statement_regions(), vec![[0, 0], [2, 4], [5, 5]]);
+        console.editor = text_editor::Content::new();
+        assert!(console.statement_regions().is_empty());
+    }
 
     fn statements(text: &str) -> Vec<&str> {
         split_statements(text, Dialect::Postgres)

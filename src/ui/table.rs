@@ -30,7 +30,7 @@ pub fn menu_message(path: &Path, action: &str, row: usize, col: usize) -> Option
     ))
 }
 
-fn menu(tab: &TableTab) -> Vec<MenuItem> {
+pub(super) fn menu(tab: &TableTab) -> Vec<MenuItem> {
     let editable = tab.editable();
     let mut items = vec![
         ("view", t!("db.cell_view"), true),
@@ -66,10 +66,14 @@ fn menu(tab: &TableTab) -> Vec<MenuItem> {
     }
     items
         .into_iter()
-        .map(|(action, label, enabled)| MenuItem {
-            label: label.to_string(),
-            action: format!("menu:{action}"),
-            enabled,
+        .map(|(action, label, enabled)| {
+            let item = MenuItem::new(label.to_string(), format!("menu:{action}")).enabled(enabled);
+            // F4 opens the form of the row, as it did.
+            if action == "form" {
+                item.key("F4")
+            } else {
+                item
+            }
         })
         .collect()
 }
