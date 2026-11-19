@@ -37,7 +37,7 @@ jobs:
           --health-cmd "mysqladmin ping -h 127.0.0.1 -psecret" --health-interval 5s
           --health-timeout 5s --health-retries 20
     env:
-      SIMPLEEDIT_TEST_MYSQL: 127.0.0.1:3306:root:secret:shop
+      ARDOISE_TEST_MYSQL: 127.0.0.1:3306:root:secret:shop
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable

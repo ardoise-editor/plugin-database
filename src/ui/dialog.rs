@@ -2,7 +2,7 @@
 //! Schemas, Advanced, Driver), as in the Data Sources window of a JetBrains
 //! IDE; Test, Save, Duplicate, Delete.
 
-use simpleedit_plugin::ui::{column, row, separator, text, ButtonStyle, Node, TextStyle};
+use ardoise_plugin::ui::{column, row, separator, text, ButtonStyle, Node, TextStyle};
 
 use super::{choice, picked, Ui};
 use crate::database::protocol::{Auth, Dialect, SshAuth, SslMode};

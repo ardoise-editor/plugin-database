@@ -5,7 +5,7 @@
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use simpleedit_plugin::Host;
+use ardoise_plugin::Host;
 
 static HOST: OnceLock<Host> = OnceLock::new();
 

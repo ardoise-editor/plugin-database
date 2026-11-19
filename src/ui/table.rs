@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use simpleedit_plugin::ui::{
+use ardoise_plugin::ui::{
     column, grid, row, scroll, separator, text, GridCell, GridColumn, GridEditing, GridEvent,
     GridRow, GridSelection, MenuItem, Node, RowState, TextStyle,
 };

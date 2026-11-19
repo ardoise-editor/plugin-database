@@ -2,9 +2,7 @@
 //! schemas, tables (and what a table is made of), functions, sequences and
 //! types; under the tree, what can be done to the node picked.
 
-use simpleedit_plugin::ui::{
-    column, row, scroll, separator, text, tree, Node, TextStyle, TreeItem,
-};
+use ardoise_plugin::ui::{column, row, scroll, separator, text, tree, Node, TextStyle, TreeItem};
 
 use super::Ui;
 use crate::app::App;
@@ -362,7 +360,7 @@ fn actions(ui: &mut Ui, app: &App, picked: &Picked) -> Node {
             };
             out.push(
                 ui.button(drop.to_string(), DbMsg::AskDrop(a, b, c, d, kind))
-                    .button_style(simpleedit_plugin::ui::ButtonStyle::Danger),
+                    .button_style(ardoise_plugin::ui::ButtonStyle::Danger),
             );
         }
     }

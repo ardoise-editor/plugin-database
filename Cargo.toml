@@ -1,10 +1,10 @@
 [package]
-name = "simpleedit-database"
+name = "ardoise-database"
 version = "1.2.1"
 edition = "2021"
 rust-version = "1.90"
 publish = false
-description = "The Database plugin of SimpleEdit"
+description = "The Database plugin of Ardoise"
 license = "MIT"
 
 [[bin]]
@@ -13,19 +13,19 @@ path = "src/main.rs"
 
 # The drivers: one program for each database, started for each operation.
 [[bin]]
-name = "simpleedit-db-postgres"
+name = "ardoise-db-postgres"
 path = "drivers/postgres/main.rs"
 
 [[bin]]
-name = "simpleedit-db-sqlite"
+name = "ardoise-db-sqlite"
 path = "drivers/sqlite/main.rs"
 
 [[bin]]
-name = "simpleedit-db-mysql"
+name = "ardoise-db-mysql"
 path = "drivers/mysql/main.rs"
 
 [dependencies]
-simpleedit-plugin = { git = "https://github.com/simple-edit-app/plugin-sdk", tag = "v0.11.0" }
+ardoise-plugin = { path = "../plugin-sdk" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision"] }
 rust-i18n = "3"

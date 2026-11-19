@@ -14,7 +14,7 @@ Passwords are kept in the system keychain when asked to. The drivers are program
 
 ```sh
 cargo test
-cargo build --release && mkdir -p bin && cp target/release/{database,simpleedit-db-postgres,simpleedit-db-sqlite,simpleedit-db-mysql} bin/
+cargo build --release && mkdir -p bin && cp target/release/{database,ardoise-db-postgres,ardoise-db-sqlite,ardoise-db-mysql} bin/
 ```
 
 ## License

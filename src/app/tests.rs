@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use super::{App, Message, Window};
 use crate::database::{DbMsg, Done};
-use simpleedit_plugin::ui::GridEvent;
+use ardoise_plugin::ui::GridEvent;
 
 /// What the grid of a table tab sends.
 fn grid(app: &mut App, path: &std::path::Path, event: GridEvent) {
@@ -643,7 +643,7 @@ fn an_sql_file_runs_on_the_data_source_of_the_console() {
     let (mut app, _) = db_app(true);
     let file = |language: &str| {
         Message::Db(DbMsg::RunFile(Box::new(
-            simpleedit_plugin::protocol::ActiveFile {
+            ardoise_plugin::protocol::ActiveFile {
                 path: None,
                 text: "SELECT 1;\nSELECT 2".into(),
                 selection: None,

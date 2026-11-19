@@ -3,7 +3,7 @@
 //! diagram; and in one tab, what waits for an answer (a drop, an SSH key, a
 //! new schema), a text to read whole and the rows a row is linked to.
 
-use simpleedit_plugin::ui::{
+use ardoise_plugin::ui::{
     column, image, row, scroll, separator, text, ButtonStyle, Node, TextStyle,
 };
 

@@ -170,7 +170,7 @@ impl App {
         &mut self,
         text: &str,
         offset: usize,
-    ) -> (usize, Vec<simpleedit_plugin::protocol::CompletionItem>) {
+    ) -> (usize, Vec<ardoise_plugin::protocol::CompletionItem>) {
         let Some(conn) = self.db.console.connection else {
             return (offset, Vec::new());
         };
@@ -185,7 +185,7 @@ impl App {
                 found
                     .items
                     .into_iter()
-                    .map(|item| simpleedit_plugin::protocol::CompletionItem {
+                    .map(|item| ardoise_plugin::protocol::CompletionItem {
                         label: item.label,
                         insert: Some(item.insert),
                         detail: item.detail,

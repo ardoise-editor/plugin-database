@@ -7,8 +7,8 @@ use std::process::{Command, Stdio};
 
 use serde_json::{json, Value};
 
-const SQLITE: &str = env!("CARGO_BIN_EXE_simpleedit-db-sqlite");
-const MYSQL: &str = env!("CARGO_BIN_EXE_simpleedit-db-mysql");
+const SQLITE: &str = env!("CARGO_BIN_EXE_ardoise-db-sqlite");
+const MYSQL: &str = env!("CARGO_BIN_EXE_ardoise-db-mysql");
 
 /// The protocol number the app speaks (the same file is compiled in both).
 fn protocol_of(program: &str) -> String {
@@ -96,11 +96,11 @@ fn the_sqlite_driver_keeps_a_session_between_lines() {
     let _ = child.wait();
 }
 
-/// Against a server: `SIMPLEEDIT_TEST_MYSQL=host:port:user:password:database`.
+/// Against a server: `ARDOISE_TEST_MYSQL=host:port:user:password:database`.
 #[test]
 fn the_mysql_driver_connects_when_a_server_is_given() {
-    let Ok(spec) = std::env::var("SIMPLEEDIT_TEST_MYSQL") else {
-        eprintln!("no SIMPLEEDIT_TEST_MYSQL: skipped");
+    let Ok(spec) = std::env::var("ARDOISE_TEST_MYSQL") else {
+        eprintln!("no ARDOISE_TEST_MYSQL: skipped");
         return;
     };
     let p: Vec<&str> = spec.split(':').collect();

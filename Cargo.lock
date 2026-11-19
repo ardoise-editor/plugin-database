@@ -47,6 +47,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "ardoise-database"
+version = "1.2.1"
+dependencies = [
+ "ardoise-plugin",
+ "chrono",
+ "keyring",
+ "libc",
+ "mysql",
+ "postgres",
+ "regex",
+ "rusqlite",
+ "rust-i18n",
+ "rust_xlsxwriter",
+ "rustls",
+ "rustls-native-certs",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "sqlformat",
+ "tempfile",
+ "tokio",
+ "tokio-postgres-rustls",
+]
+
+[[package]]
+name = "ardoise-plugin"
+version = "0.12.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "async-broadcast"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2243,40 +2276,6 @@ name = "simd-adler32"
 version = "0.3.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
-
-[[package]]
-name = "simpleedit-database"
-version = "1.2.1"
-dependencies = [
- "chrono",
- "keyring",
- "libc",
- "mysql",
- "postgres",
- "regex",
- "rusqlite",
- "rust-i18n",
- "rust_xlsxwriter",
- "rustls",
- "rustls-native-certs",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "simpleedit-plugin",
- "sqlformat",
- "tempfile",
- "tokio",
- "tokio-postgres-rustls",
-]
-
-[[package]]
-name = "simpleedit-plugin"
-version = "0.11.0"
-source = "git+https://github.com/simple-edit-app/plugin-sdk?tag=v0.11.0#256cbf520bdb9209c822e038dabaf2589235c2dc"
-dependencies = [
- "serde",
- "serde_json",
-]
 
 [[package]]
 name = "siphasher"

@@ -800,12 +800,12 @@ mod tests {
         assert_eq!(literal("it's a\\b"), "'it''s a\\\\b'");
     }
 
-    /// Against a real server: `SIMPLEEDIT_TEST_MYSQL=host:port:user:password:database`
+    /// Against a real server: `ARDOISE_TEST_MYSQL=host:port:user:password:database`
     /// (a MariaDB or MySQL; it creates and drops a table of its own).
     #[test]
     fn a_real_server_is_read_changed_and_exported() {
-        let Ok(spec) = std::env::var("SIMPLEEDIT_TEST_MYSQL") else {
-            eprintln!("no SIMPLEEDIT_TEST_MYSQL: skipped");
+        let Ok(spec) = std::env::var("ARDOISE_TEST_MYSQL") else {
+            eprintln!("no ARDOISE_TEST_MYSQL: skipped");
             return;
         };
         let parts: Vec<&str> = spec.split(':').collect();
@@ -940,8 +940,8 @@ mod tests {
     /// statement stopped from another connection.
     #[test]
     fn a_lost_session_is_opened_again_and_a_long_statement_is_stopped() {
-        let Ok(spec) = std::env::var("SIMPLEEDIT_TEST_MYSQL") else {
-            eprintln!("no SIMPLEEDIT_TEST_MYSQL: skipped");
+        let Ok(spec) = std::env::var("ARDOISE_TEST_MYSQL") else {
+            eprintln!("no ARDOISE_TEST_MYSQL: skipped");
             return;
         };
         let parts: Vec<&str> = spec.split(':').collect();

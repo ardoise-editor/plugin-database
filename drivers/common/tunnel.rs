@@ -142,12 +142,9 @@ fn drain<R: Read + Send + 'static>(mut reader: R) -> std::thread::JoinHandle<()>
 /// A script `ssh` runs to ask for the password: it prints the secret, which
 /// reaches it through the environment (never the command line).
 fn secret_script(command: &mut Command, secret: &str) -> Result<PathBuf, String> {
-    let path = std::env::temp_dir().join(format!("simpleedit-askpass-{}", std::process::id()));
-    std::fs::write(
-        &path,
-        "#!/bin/sh\nprintf '%s\\n' \"$SIMPLEEDIT_SSH_SECRET\"\n",
-    )
-    .map_err(|e| e.to_string())?;
+    let path = std::env::temp_dir().join(format!("ardoise-askpass-{}", std::process::id()));
+    std::fs::write(&path, "#!/bin/sh\nprintf '%s\\n' \"$ARDOISE_SSH_SECRET\"\n")
+        .map_err(|e| e.to_string())?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -157,7 +154,7 @@ fn secret_script(command: &mut Command, secret: &str) -> Result<PathBuf, String>
     command
         .env("SSH_ASKPASS", &path)
         .env("SSH_ASKPASS_REQUIRE", "force")
-        .env("SIMPLEEDIT_SSH_SECRET", secret)
+        .env("ARDOISE_SSH_SECRET", secret)
         .env(
             "DISPLAY",
             std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into()),

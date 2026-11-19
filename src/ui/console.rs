@@ -3,7 +3,7 @@
 //! the values asked for and the guard before writes; and the log of what
 //! was run.
 
-use simpleedit_plugin::ui::{column, row, scroll, separator, text, Node, TextStyle};
+use ardoise_plugin::ui::{column, row, scroll, separator, text, Node, TextStyle};
 
 use super::Ui;
 use crate::app::App;
@@ -16,9 +16,9 @@ pub fn view(ui: &mut Ui, app: &App) -> Node {
     let tab = |ui: &mut Ui, label: String, which: ConsoleTab| {
         let b = ui.button(label, DbMsg::ConsoleTab(which));
         if c.tab == which {
-            b.button_style(simpleedit_plugin::ui::ButtonStyle::Primary)
+            b.button_style(ardoise_plugin::ui::ButtonStyle::Primary)
         } else {
-            b.button_style(simpleedit_plugin::ui::ButtonStyle::Ghost)
+            b.button_style(ardoise_plugin::ui::ButtonStyle::Ghost)
         }
     };
     let mut header = vec![
@@ -80,7 +80,7 @@ pub fn view(ui: &mut Ui, app: &App) -> Node {
             }
             header.push(
                 ui.button_if(t!("db.run").to_string(), ready.then_some(DbMsg::Run(false)))
-                    .button_style(simpleedit_plugin::ui::ButtonStyle::Primary),
+                    .button_style(ardoise_plugin::ui::ButtonStyle::Primary),
             );
             header.push(ui.tool(t!("db.format").to_string(), DbMsg::FormatSql));
             header.push(ui.button_if(
@@ -132,9 +132,9 @@ fn queries(ui: &mut Ui, app: &App) -> Node {
     for (at, doc) in c.docs.iter().enumerate() {
         let b = ui.button(doc.title.clone(), DbMsg::SwitchConsole(at));
         tabs.push(if at == c.active {
-            b.button_style(simpleedit_plugin::ui::ButtonStyle::Primary)
+            b.button_style(ardoise_plugin::ui::ButtonStyle::Primary)
         } else {
-            b.button_style(simpleedit_plugin::ui::ButtonStyle::Ghost)
+            b.button_style(ardoise_plugin::ui::ButtonStyle::Ghost)
         });
         if c.docs.len() > 1 {
             tabs.push(ui.tool("×", DbMsg::CloseConsole(at)));
@@ -149,7 +149,7 @@ fn queries(ui: &mut Ui, app: &App) -> Node {
         .regions(c.statement_regions());
     // The word the server blamed, underlined.
     if let Some(mark) = &c.error_mark {
-        editor = editor.mark(simpleedit_plugin::ui::EditorMark {
+        editor = editor.mark(ardoise_plugin::ui::EditorMark {
             line: mark.line,
             column: mark.column,
             len: mark.len,
@@ -176,7 +176,7 @@ fn queries(ui: &mut Ui, app: &App) -> Node {
         row([
             text(said).style(TextStyle::Error),
             ui.button(t!("db.guard_run").to_string(), DbMsg::GuardRun)
-                .button_style(simpleedit_plugin::ui::ButtonStyle::Danger),
+                .button_style(ardoise_plugin::ui::ButtonStyle::Danger),
             ui.tool(t!("db.guard_cancel").to_string(), DbMsg::GuardCancel),
         ])
         .spacing(6.0)
@@ -271,9 +271,9 @@ fn log(ui: &mut Ui, app: &App) -> Node {
         }
         list.push(row(head).spacing(6.0));
         // A click on the SQL picks the entry.
-        let mut sql = simpleedit_plugin::ui::list(
+        let mut sql = ardoise_plugin::ui::list(
             "log_entry",
-            [simpleedit_plugin::ui::item(
+            [ardoise_plugin::ui::item(
                 ui.act(DbMsg::SelectLog(at)),
                 entry.sql.clone(),
             )],

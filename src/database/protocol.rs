@@ -39,9 +39,9 @@ impl Dialect {
     /// The name of its driver program.
     pub fn driver_name(self) -> &'static str {
         match self {
-            Dialect::Postgres => "simpleedit-db-postgres",
-            Dialect::Sqlite => "simpleedit-db-sqlite",
-            Dialect::Mysql => "simpleedit-db-mysql",
+            Dialect::Postgres => "ardoise-db-postgres",
+            Dialect::Sqlite => "ardoise-db-sqlite",
+            Dialect::Mysql => "ardoise-db-mysql",
         }
     }
 

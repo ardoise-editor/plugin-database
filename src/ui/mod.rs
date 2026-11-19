@@ -13,13 +13,13 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use simpleedit_plugin::protocol::{
+use ardoise_plugin::protocol::{
     CompletionParams, Completions, Context, InitializeParams, Settings, TreeAction, UiEvent,
 };
-use simpleedit_plugin::ui::{
+use ardoise_plugin::ui::{
     button, checkbox, input, select, tree_item, ButtonStyle, GridEvent, Node, TreeItem,
 };
-use simpleedit_plugin::{run as run_plugin, Host, Plugin};
+use ardoise_plugin::{run as run_plugin, Host, Plugin};
 
 use crate::app::{App, Effect, Message, Window};
 use crate::database::DbMsg;
@@ -160,7 +160,7 @@ impl Ui {
         then: impl Fn(String) -> DbMsg + Send + 'static,
     ) -> Node {
         self.acts.insert(id.to_string(), Act::Text(Box::new(then)));
-        simpleedit_plugin::ui::editor(id, value, language)
+        ardoise_plugin::ui::editor(id, value, language)
     }
 
     /// What the chevron of a row of a tree does.
@@ -556,7 +556,7 @@ impl Plugin for DbPlugin {
             std::thread::spawn(move || {
                 if let Ok(found) = me.host.editor_state(crate::CONSOLE, "sql") {
                     use crate::text_editor::{Cursor, Position};
-                    let at = |p: simpleedit_plugin::protocol::TextPosition| Position {
+                    let at = |p: ardoise_plugin::protocol::TextPosition| Position {
                         line: p.line,
                         column: p.column,
                     };

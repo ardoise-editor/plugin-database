@@ -201,8 +201,8 @@ impl App {
     }
 
     /// What is done in the grid of a table tab.
-    fn db_grid(&mut self, path: PathBuf, event: simpleedit_plugin::ui::GridEvent) -> Task<Message> {
-        use simpleedit_plugin::ui::GridEvent;
+    fn db_grid(&mut self, path: PathBuf, event: ardoise_plugin::ui::GridEvent) -> Task<Message> {
+        use ardoise_plugin::ui::GridEvent;
         let Some(tab) = self.db_tabs.get(&path) else {
             return Task::none();
         };
@@ -357,7 +357,7 @@ impl App {
 
     /// Runs what the SQL file being edited says (its selection, or all of
     /// it), on the data source of the console, as the console would.
-    fn db_run_file(&mut self, file: simpleedit_plugin::protocol::ActiveFile) -> Task<Message> {
+    fn db_run_file(&mut self, file: ardoise_plugin::protocol::ActiveFile) -> Task<Message> {
         let sql = file.language.as_deref() == Some("sql")
             || file
                 .path

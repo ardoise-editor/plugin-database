@@ -101,7 +101,7 @@ pub enum DbMsg {
     Picked(Picked),
     /// What is done in the grid of a table tab (columns by their place
     /// among those shown).
-    Grid(PathBuf, simpleedit_plugin::ui::GridEvent),
+    Grid(PathBuf, ardoise_plugin::ui::GridEvent),
     /// An item of the menu of a cell: the action, the row, the column shown.
     GridMenu(PathBuf, String, usize, usize),
     Reload(u64),
@@ -294,7 +294,7 @@ pub enum DbMsg {
     FormatSql,
     /// The SQL of the file being edited (its selection, or all of it) runs
     /// on the data source of the console.
-    RunFile(Box<simpleedit_plugin::protocol::ActiveFile>),
+    RunFile(Box<ardoise_plugin::protocol::ActiveFile>),
     LogReuse(usize),
     GuardRun,
     GuardCancel,
@@ -899,9 +899,9 @@ fn driver_candidates(picked: &str, dialect: protocol::Dialect) -> Vec<PathBuf> {
         found.push(PathBuf::from(picked.trim()));
     }
     let variable = match dialect {
-        protocol::Dialect::Postgres => "SIMPLEEDIT_DB_DRIVER",
-        protocol::Dialect::Sqlite => "SIMPLEEDIT_DB_DRIVER_SQLITE",
-        protocol::Dialect::Mysql => "SIMPLEEDIT_DB_DRIVER_MYSQL",
+        protocol::Dialect::Postgres => "ARDOISE_DB_DRIVER",
+        protocol::Dialect::Sqlite => "ARDOISE_DB_DRIVER_SQLITE",
+        protocol::Dialect::Mysql => "ARDOISE_DB_DRIVER_MYSQL",
     };
     if let Some(path) = std::env::var_os(variable) {
         found.push(PathBuf::from(path));
@@ -3603,7 +3603,7 @@ mod tests {
     }
 
     /// Against a real server, with the driver built next to the app:
-    /// `SIMPLEEDIT_DB_DRIVER=target/debug/simpleedit-db-postgres
+    /// `ARDOISE_DB_DRIVER=target/debug/ardoise-db-postgres
     /// SE_PG_TEST=127.0.0.1:55432:shop:dev:secret cargo test live_postgres
     /// -- --ignored`.
     #[test]
@@ -4417,7 +4417,7 @@ mod other_systems_tests {
     /// The SQLite driver, built by Cargo next to the test program.
     fn sqlite_driver() -> Option<PathBuf> {
         let exe = std::env::current_exe().ok()?;
-        let built = exe.parent()?.parent()?.join("simpleedit-db-sqlite");
+        let built = exe.parent()?.parent()?.join("ardoise-db-sqlite");
         built.is_file().then_some(built)
     }
 
@@ -4427,7 +4427,7 @@ mod other_systems_tests {
             eprintln!("the SQLite driver is not built: skipped");
             return;
         };
-        std::env::set_var("SIMPLEEDIT_DB_DRIVER_SQLITE", &driver);
+        std::env::set_var("ARDOISE_DB_DRIVER_SQLITE", &driver);
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("shop.db");
         let conn = rusqlite::Connection::open(&file).unwrap();

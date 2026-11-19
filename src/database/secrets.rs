@@ -3,7 +3,7 @@
 //! connections. Where there is no keychain, the caller keeps them in the file.
 
 #[cfg_attr(test, allow(dead_code))]
-const SERVICE: &str = "SimpleEdit data source";
+const SERVICE: &str = "Ardoise data source";
 
 fn account(id: u64, kind: &str) -> String {
     format!("{id}/{kind}")
