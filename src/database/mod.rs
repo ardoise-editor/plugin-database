@@ -2482,6 +2482,14 @@ pub struct State {
 }
 
 impl State {
+    /// The passwords of every data source taken out of the system keychain
+    /// (the plugin is removed with its data).
+    pub fn forget_secrets(&self) {
+        for c in &self.connections {
+            secrets::forget(c.id);
+        }
+    }
+
     /// The session of a data source, made when there is none.
     pub fn live_of(&mut self, id: u64) -> Live {
         self.live.entry(id).or_default().clone()

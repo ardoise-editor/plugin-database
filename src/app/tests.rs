@@ -1862,3 +1862,23 @@ fn an_answer_for_a_window_that_is_not_the_open_one_is_dropped() {
     let _ = app.update(Message::Db(on_time));
     assert!(app.db.designer.is_none());
 }
+
+#[test]
+fn removing_the_plugin_with_its_data_takes_the_passwords_out_of_the_keychain() {
+    use crate::database::secrets;
+    let mut app = App::new();
+    app.db.connections.clear();
+    for id in [9101, 9102] {
+        app.db.connections.push(crate::database::Connection {
+            id,
+            ..Default::default()
+        });
+        assert!(secrets::save(id, secrets::PASSWORD, "hunter2"));
+        assert!(secrets::save(id, secrets::SSH, "ssh-pass"));
+    }
+    app.db.forget_secrets();
+    for id in [9101, 9102] {
+        assert_eq!(secrets::load(id, secrets::PASSWORD), None);
+        assert_eq!(secrets::load(id, secrets::SSH), None);
+    }
+}

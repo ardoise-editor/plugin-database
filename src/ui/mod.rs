@@ -593,6 +593,13 @@ impl Plugin for DbPlugin {
         })
     }
 
+    fn forget_data(&mut self, _: &Host) -> Result<(), String> {
+        if let Some(shared) = &self.shared {
+            lock(&shared.state).app.db.forget_secrets();
+        }
+        Ok(())
+    }
+
     fn shutdown(&mut self, _: &Host) {
         if let Some(shared) = &self.shared {
             lock(&shared.state).app.db.console.save();

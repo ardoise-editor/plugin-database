@@ -1,6 +1,6 @@
 [package]
 name = "simpleedit-database"
-version = "1.1.1"
+version = "1.2.0"
 edition = "2021"
 rust-version = "1.90"
 publish = false
@@ -25,7 +25,7 @@ name = "simpleedit-db-mysql"
 path = "drivers/mysql/main.rs"
 
 [dependencies]
-simpleedit-plugin = { git = "https://github.com/simple-edit-app/plugin-sdk", tag = "v0.10.0" }
+simpleedit-plugin = { git = "https://github.com/simple-edit-app/plugin-sdk", tag = "v0.11.0" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order", "arbitrary_precision"] }
 rust-i18n = "3"
