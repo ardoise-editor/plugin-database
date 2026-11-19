@@ -1,4 +1,4 @@
-//! The SQLite driver of SimpleEdit's Database panel: a separate program, as
+//! The SQLite driver of Ardoise's Database panel: a separate program, as
 //! the PostgreSQL one, speaking the same protocol. The "database" of a data
 //! source is the path of the file.
 

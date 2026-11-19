@@ -609,7 +609,7 @@ fn dump(engine: &mut dyn Engine, request: &Request) -> Result<Value, String> {
         std::fs::File::create(&request.path).map_err(|e| format!("{}: {e}", request.path))?;
     let mut out = std::io::BufWriter::new(file);
     let write_err = |e: std::io::Error| e.to_string();
-    writeln!(out, "-- SimpleEdit SQL backup").map_err(write_err)?;
+    writeln!(out, "-- Ardoise SQL backup").map_err(write_err)?;
     // The tables refer to each other in any order: the checks wait for the end.
     let (off, on) = match request.target.dialect {
         protocol::Dialect::Sqlite => ("PRAGMA foreign_keys = OFF;", "PRAGMA foreign_keys = ON;"),
@@ -696,7 +696,7 @@ fn dump(engine: &mut dyn Engine, request: &Request) -> Result<Value, String> {
     out.flush().map_err(write_err)?;
     drop(out);
     let size = std::fs::metadata(&request.path).map_or(0, |m| m.len());
-    Ok(json!({ "path": request.path, "tool": "SimpleEdit SQL", "size": size, "said": "" }))
+    Ok(json!({ "path": request.path, "tool": "Ardoise SQL", "size": size, "said": "" }))
 }
 
 /// Runs the statements of a backup file, one after the other, in one
@@ -741,7 +741,7 @@ fn restore(engine: &mut dyn Engine, request: &Request) -> Result<Value, String> 
             }
         }
     }
-    Ok(json!({ "tool": "SimpleEdit SQL", "said": format!("{ran} statements") }))
+    Ok(json!({ "tool": "Ardoise SQL", "said": format!("{ran} statements") }))
 }
 
 /// Rows per INSERT when a file is imported.

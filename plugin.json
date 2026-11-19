@@ -4,14 +4,14 @@
     "en": "Database",
     "fr": "Base de données"
   },
-  "version": "1.2.0",
+  "version": "1.2.1",
   "api": 1,
   "description": {
     "en": "PostgreSQL, MySQL / MariaDB and SQLite (through SSH and TLS): the tree of a data source, its tables in tabs to filter, sort and edit, a SQL console with completion, the table designer, the ER diagram, import, export, copy, backup and health",
     "fr": "PostgreSQL, MySQL / MariaDB et SQLite (via SSH et TLS) : l'arbre d'une source, ses tables en onglets à filtrer, trier et modifier, une console SQL avec complétion, le concepteur de tables, le diagramme ER, import, export, copie, sauvegarde et santé"
   },
-  "author": "SimpleEdit",
-  "repository": "simple-edit-app/plugin-database",
+  "author": "Ardoise Editor",
+  "repository": "ardoise-editor/plugin-database",
   "license": "MIT",
   "command": [
     "bin/database"

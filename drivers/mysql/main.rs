@@ -1,4 +1,4 @@
-//! The MySQL and MariaDB driver of SimpleEdit's Database panel: a separate
+//! The MySQL and MariaDB driver of Ardoise's Database panel: a separate
 //! program, as the PostgreSQL one, speaking the same protocol. A MySQL
 //! "database" is what the tree calls a schema: the server is the one node
 //! above them.

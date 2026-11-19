@@ -1,6 +1,6 @@
-# Database — a SimpleEdit plugin
+# Database — an Ardoise Editor plugin
 
-Databases in [SimpleEdit](https://github.com/simple-edit-app/simpleedit): PostgreSQL, MySQL / MariaDB and SQLite, directly or through an SSH tunnel, with TLS.
+Databases in [Ardoise Editor](https://github.com/ardoise-editor/ardoise): PostgreSQL, MySQL / MariaDB and SQLite, directly or through an SSH tunnel, with TLS.
 
 - **The tree** of each data source (sidebar): databases, schemas, tables and what they are made of, functions, sequences, types; under it, what can be done to the node picked (open, structure, modify, DDL, import, copy, backup and restore, empty, drop, new table or schema, ER diagram, health).
 - **A table in a tab**: its rows by pages, a WHERE condition, a search, filters by column, sorts, hidden columns, the row as a form; cells edited, rows added and deleted, all waiting for Commit (the SQL shown first); a date picker; links to the rows a row points to and those that point to it; export to CSV, JSON, SQL, XLSX and Markdown.

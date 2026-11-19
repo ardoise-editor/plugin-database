@@ -1,4 +1,4 @@
-//! The PostgreSQL driver of SimpleEdit's Database panel.
+//! The PostgreSQL driver of Ardoise's Database panel.
 //!
 //! A separate program, downloaded on demand by the app (like the JDBC
 //! drivers of a JetBrains IDE). The app starts it once per operation and

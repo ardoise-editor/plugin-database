@@ -1,4 +1,4 @@
-//! The Database plugin of SimpleEdit: data sources (PostgreSQL, MySQL /
+//! The Database plugin of Ardoise: data sources (PostgreSQL, MySQL /
 //! MariaDB, SQLite, through SSH and TLS), their tree, the rows of a table in
 //! a tab to read, filter, sort and edit, a SQL console with its log and its
 //! completion, the designer of a table, the ER diagram of a schema, import,
