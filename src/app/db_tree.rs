@@ -310,16 +310,8 @@ impl App {
                 Some(view) => crate::task::copy(view.text.clone()),
                 None => Task::none(),
             },
-            DbMsg::TextClose => {
-                self.db.text = None;
-                Task::none()
-            }
             DbMsg::ShowLinks(view) => {
                 self.db.links = Some(*view);
-                Task::none()
-            }
-            DbMsg::CloseLinks => {
-                self.db.links = None;
                 Task::none()
             }
             DbMsg::OpenRelated(conn, database, schema, table, filter) => {

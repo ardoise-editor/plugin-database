@@ -164,16 +164,17 @@ fn a_sqlite_table_is_opened_edited_and_queried() {
     // A data source, in its form.
     let add = editor.action("database", "Add a database");
     editor.event("database", &add, Value::Null);
-    editor.until("the form", |e| e.shows("connection", "Database system"));
-    editor.event("connection", "dialect", json!("SQLite"));
-    editor.until("the file field", |e| e.shows("connection", "\"Database\""));
+    editor.until("the form", |e| e.shows("connection", "\"tiles\""));
+    // The tiles: PostgreSQL, MySQL / MariaDB, SQLite, by their place.
+    editor.event("connection", "dialect", json!("2"));
+    editor.until("the file field", |e| e.shows("connection", "folder-open"));
     editor.event("connection", "Database", json!(file.display().to_string()));
     editor.event("connection", "Name", json!("shop"));
     editor.until("a form that can be saved", |e| {
         e.shows("connection", "shop.db")
-            && !e.shows("connection", "\"enabled\":false,\"label\":\"OK\"")
+            && !e.shows("connection", "\"enabled\":false,\"label\":\"Save\"")
     });
-    let save = editor.action("connection", "OK");
+    let save = editor.action("connection", "Save");
     editor.event("connection", &save, Value::Null);
     editor.until("the source in the tree", |e| {
         e.shows("database", "\"shop\"")

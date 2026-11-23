@@ -2,7 +2,7 @@
 //! Schemas, Advanced, Driver), as in the Data Sources window of a JetBrains
 //! IDE; Test, Save, Duplicate, Delete.
 
-use ardoise_plugin::ui::{column, row, separator, text, ButtonStyle, Node, TextStyle};
+use ardoise_plugin::ui::{column, footer, row, separator, text, ButtonStyle, Node, TextStyle};
 
 use super::{choice, picked, Ui};
 use crate::database::protocol::{Auth, Dialect, SshAuth, SslMode};
@@ -29,14 +29,24 @@ fn field(ui: &mut Ui, label: String, value: &str, which: Field, secret: bool) ->
     if secret {
         node = node.secret();
     }
-    row([text(label), node]).spacing(8.0)
+    labelled(label, node)
+}
+
+/// A control with its label above it (small, muted).
+fn labelled(label: String, node: Node) -> Node {
+    column([text(label).style(TextStyle::Muted), node]).spacing(4.0)
 }
 
 /// A path, typed or picked.
 fn file(ui: &mut Ui, label: String, value: &str, which: Field) -> Node {
     let id = format!("{which:?}");
     let node = ui.input(&id, value, "", move |t| DbMsg::Text(which, t));
-    row([text(label), node, ui.tool("…", DbMsg::Browse(which))]).spacing(8.0)
+    let browse = ui.icon_tool(
+        "folder-open",
+        t!("db.browse").to_string(),
+        DbMsg::Browse(which),
+    );
+    labelled(label, row([node, browse]).spacing(4.0))
 }
 
 fn flag(ui: &mut Ui, label: String, on: bool, which: Flag) -> Node {
@@ -63,24 +73,17 @@ fn pick<T: Copy + PartialEq + Send + Sync + 'static>(
         Some(v) => DbMsg::Choose(then(v)),
         None => DbMsg::CloseDialog,
     });
-    row([text(label), node]).spacing(8.0)
+    labelled(label, node)
 }
 
 pub fn view(ui: &mut Ui, state: &State, dialog: &Dialog) -> Node {
-    let title = if dialog.editing.is_some() {
-        t!("db.dialog_edit")
-    } else {
-        t!("db.dialog_new")
-    };
-    let mut tabs = Vec::new();
-    for tab in DialogTab::ALL {
-        let b = ui.button(tab_label(tab), DbMsg::Tab(tab));
-        tabs.push(if dialog.tab == tab {
-            b.button_style(ButtonStyle::Primary)
-        } else {
-            b.button_style(ButtonStyle::Ghost)
-        });
-    }
+    let tabs = ui.tabs(
+        "dialog_tab",
+        &DialogTab::ALL,
+        dialog.tab,
+        tab_label,
+        DbMsg::Tab,
+    );
     let body = match dialog.tab {
         DialogTab::General => general(ui, state, dialog),
         DialogTab::Options => options(ui, dialog),
@@ -96,38 +99,36 @@ pub fn view(ui: &mut Ui, state: &State, dialog: &Dialog) -> Node {
         TestState::Failed(error) => text(error.clone()).style(TextStyle::Error),
     };
     let can_test = dialog.valid() && dialog.test != TestState::Running;
-    let mut buttons = vec![
-        ui.button_if(t!("db.test").to_string(), can_test.then_some(DbMsg::Test)),
-        ui.button_if(
-            t!("db.save").to_string(),
-            dialog.valid().then_some(DbMsg::Save),
+    // At the left, the pictos (test, duplicate); at the right Cancel, Delete
+    // (when editing) and Save.
+    let mut start = vec![ui
+        .icon_tool_if(
+            "zap",
+            t!("db.test").to_string(),
+            can_test.then_some(DbMsg::Test),
         )
-        .button_style(ButtonStyle::Primary),
-    ];
+        .button_style(ButtonStyle::Outline)];
+    let mut end = vec![ui.button(t!("db.cancel_dialog").to_string(), DbMsg::CloseDialog)];
     if let Some(id) = dialog.editing {
-        buttons.push(ui.tool(t!("db.duplicate").to_string(), DbMsg::Duplicate(id)));
+        start.push(ui.icon_tool("copy", t!("db.duplicate").to_string(), DbMsg::Duplicate(id)));
         let label = if dialog.confirm_delete {
             t!("db.delete_confirm")
         } else {
             t!("db.delete")
         };
-        buttons.push(
+        end.push(
             ui.button(label.to_string(), DbMsg::Delete)
                 .button_style(ButtonStyle::Danger),
         );
     }
-    buttons.push(ui.tool(t!("db.cancel_dialog").to_string(), DbMsg::CloseDialog));
-    column([
-        text(title.to_string()).style(TextStyle::Heading),
-        row(tabs).spacing(2.0),
-        separator(),
-        body,
-        separator(),
-        test,
-        row(buttons).spacing(6.0),
-    ])
-    .spacing(8.0)
-    .padding(12.0)
+    end.push(
+        ui.button_if(
+            t!("db.save").to_string(),
+            dialog.valid().then_some(DbMsg::Save),
+        )
+        .button_style(ButtonStyle::Primary),
+    );
+    column([tabs, body, test, footer(start, end)]).spacing(16.0)
 }
 
 fn general(ui: &mut Ui, state: &State, dialog: &Dialog) -> Node {
@@ -136,6 +137,20 @@ fn general(ui: &mut Ui, state: &State, dialog: &Dialog) -> Node {
     if dialog.needs_password {
         form.push(text(t!("db.password_needed").to_string()).style(TextStyle::Error));
     }
+    // The kind of the data source: three tiles.
+    form.push(ui.tiles(
+        "dialect",
+        &Dialect::ALL,
+        d.dialect,
+        |v| v.label().to_string(),
+        |v| {
+            Some(match v {
+                Dialect::Sqlite => "file",
+                _ => "database",
+            })
+        },
+        |v| DbMsg::Choose(Choice::Dialect(v)),
+    ));
     form.push(field(
         ui,
         t!("db.field_name").to_string(),
@@ -149,15 +164,6 @@ fn general(ui: &mut Ui, state: &State, dialog: &Dialog) -> Node {
         &d.comment,
         Field::Comment,
         false,
-    ));
-    form.push(pick(
-        ui,
-        "dialect",
-        t!("db.dialect").to_string(),
-        &Dialect::ALL,
-        d.dialect,
-        |v| v.label().to_string(),
-        Choice::Dialect,
     ));
     // A SQLite database is a file: nothing else is asked.
     if d.dialect == Dialect::Sqlite {
@@ -198,20 +204,22 @@ fn general(ui: &mut Ui, state: &State, dialog: &Dialog) -> Node {
             false,
         ));
     } else {
-        form.push(field(
+        let host = field(
             ui,
             t!("db.field_host").to_string(),
             &d.host,
             Field::Host,
             false,
-        ));
-        form.push(field(
+        );
+        let port = field(
             ui,
             t!("db.field_port").to_string(),
             &dialog.port,
             Field::Port,
             false,
-        ));
+        )
+        .width(110.0);
+        form.push(row([host, port]).spacing(12.0));
         form.push(field(
             ui,
             t!("db.field_database").to_string(),
@@ -241,22 +249,27 @@ fn general(ui: &mut Ui, state: &State, dialog: &Dialog) -> Node {
         Choice::Auth,
     ));
     if d.auth != Auth::NoAuth {
-        form.push(field(
+        let user = field(
             ui,
             t!("db.field_user").to_string(),
             &d.user,
             Field::User,
             false,
-        ));
+        );
+        if d.auth == Auth::UserPassword {
+            let password = field(
+                ui,
+                t!("db.field_password").to_string(),
+                &dialog.password,
+                Field::Password,
+                true,
+            );
+            form.push(row([user, password]).spacing(12.0));
+        } else {
+            form.push(user);
+        }
     }
     if d.auth == Auth::UserPassword {
-        form.push(field(
-            ui,
-            t!("db.field_password").to_string(),
-            &dialog.password,
-            Field::Password,
-            true,
-        ));
         const REMEMBER: [Remember; 3] =
             [Remember::Never, Remember::UntilRestart, Remember::Forever];
         form.push(pick(
@@ -532,7 +545,11 @@ fn advanced(ui: &mut Ui, dialog: &Dialog) -> Node {
                 ui.input(&format!("prop_value_{i}"), value, "", move |t| {
                     DbMsg::PropValue(i, t)
                 }),
-                ui.tool("×", DbMsg::PropRemove(i)),
+                ui.icon_tool(
+                    "trash-2",
+                    t!("db.dremove").to_string(),
+                    DbMsg::PropRemove(i),
+                ),
             ])
             .spacing(6.0),
         );

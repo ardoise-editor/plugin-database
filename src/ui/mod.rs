@@ -4,9 +4,9 @@
 
 mod admin;
 mod console;
-mod dialog;
+pub mod dialog;
 mod table;
-mod tree;
+pub mod tree;
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -103,8 +103,97 @@ impl Ui {
         self.button(label, msg).button_style(ButtonStyle::Ghost)
     }
 
+    /// A square button that is only a picto (a Lucide icon): `tip` is its
+    /// tooltip and its accessible name.
+    pub fn icon_tool(&mut self, icon: &str, tip: impl Into<String>, msg: DbMsg) -> Node {
+        self.tool(tip, msg).icon(icon)
+    }
+
+    /// The same, doing nothing when `msg` is none.
+    pub fn icon_tool_if(&mut self, icon: &str, tip: impl Into<String>, msg: Option<DbMsg>) -> Node {
+        match msg {
+            Some(msg) => self.icon_tool(icon, tip, msg),
+            None => button(tip, "none")
+                .button_style(ButtonStyle::Ghost)
+                .icon(icon)
+                .enabled(false),
+        }
+    }
+
     pub fn primary(&mut self, label: impl Into<String>, msg: DbMsg) -> Node {
         self.button(label, msg).button_style(ButtonStyle::Primary)
+    }
+
+    /// A strip of tabs, one per value of `all`, the open one underlined.
+    pub fn tabs<T: Copy + PartialEq + Send + Sync + 'static>(
+        &mut self,
+        id: &str,
+        all: &'static [T],
+        open: T,
+        label: fn(T) -> String,
+        then: fn(T) -> DbMsg,
+    ) -> Node {
+        let (items, at) = Self::choices(all, open, label, |_| None);
+        self.pick_index(id, all, open, then);
+        ardoise_plugin::ui::tabs(id, items).selected(at)
+    }
+
+    /// Tiles, one per value of `all`, a picto above each label.
+    pub fn tiles<T: Copy + PartialEq + Send + Sync + 'static>(
+        &mut self,
+        id: &str,
+        all: &'static [T],
+        chosen: T,
+        label: fn(T) -> String,
+        icon: fn(T) -> Option<&'static str>,
+        then: fn(T) -> DbMsg,
+    ) -> Node {
+        let (items, at) = Self::choices(all, chosen, label, icon);
+        self.pick_index(id, all, chosen, then);
+        ardoise_plugin::ui::tiles(id, items).selected(at)
+    }
+
+    fn choices<T: Copy + PartialEq>(
+        all: &[T],
+        selected: T,
+        label: fn(T) -> String,
+        icon: impl Fn(T) -> Option<&'static str>,
+    ) -> (Vec<ardoise_plugin::ui::Item>, String) {
+        let items = all
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                let item = ardoise_plugin::ui::item(i.to_string(), label(*v));
+                match icon(*v) {
+                    Some(icon) => item.icon(icon),
+                    None => item,
+                }
+            })
+            .collect();
+        let at = all.iter().position(|v| *v == selected).unwrap_or(0);
+        (items, at.to_string())
+    }
+
+    /// The event of tabs or tiles carries the place of the one picked; a
+    /// stale one (nothing there any more) picks what is already chosen.
+    fn pick_index<T: Copy + Send + Sync + 'static>(
+        &mut self,
+        id: &str,
+        all: &'static [T],
+        current: T,
+        then: fn(T) -> DbMsg,
+    ) {
+        self.acts.insert(
+            id.to_string(),
+            Act::Text(Box::new(move |at| {
+                let value = at
+                    .parse::<usize>()
+                    .ok()
+                    .and_then(|i| all.get(i).copied())
+                    .unwrap_or(current);
+                then(value)
+            })),
+        );
     }
 
     /// A field with a fixed id (the editor keeps what is typed in it).
@@ -221,6 +310,8 @@ struct State {
     panels: HashMap<String, Ui>,
     /// The tabs of the plugin open in the editor.
     open_tabs: std::collections::HashSet<String>,
+    /// The title each window was opened with: a new one reopens it.
+    titles: HashMap<String, String>,
     dark: bool,
 }
 
@@ -286,13 +377,18 @@ impl Shared {
     fn render(&self) {
         let mut state = lock(&self.state);
         let dark = state.dark;
-        // The windows of the tool are tabs, open while they are wanted.
+        // The windows of the tool are popins (the diagram, a tab), open while
+        // they are wanted.
         let wanted = windows(&state.app);
         let mut opens = Vec::new();
         let mut closes = Vec::new();
         for (id, title, on) in &wanted {
             let open = state.open_tabs.contains(*id);
             if *on && !open {
+                opens.push((id.to_string(), title.clone()));
+            } else if *on && state.titles.get(*id) != Some(title) {
+                // Open, but with another title (the next of the questions):
+                // the editor renames it and brings it in front.
                 opens.push((id.to_string(), title.clone()));
             } else if !*on && open {
                 closes.push(id.to_string());
@@ -331,11 +427,13 @@ impl Shared {
             }
         }
         state.panels = panels;
-        for (id, _) in &opens {
+        for (id, title) in &opens {
             state.open_tabs.insert(id.clone());
+            state.titles.insert(id.clone(), title.clone());
         }
         for id in &closes {
             state.open_tabs.remove(id);
+            state.titles.remove(id);
         }
         drop(state);
         for (id, node) in drawn {
@@ -344,8 +442,14 @@ impl Shared {
         for (id, dirty) in dirty {
             self.host.tab_dirty(&id, dirty);
         }
+        // The windows are popins over the editor, but the diagram, which is
+        // read and compared with the tables, stays a tab.
         for (id, title) in opens {
-            let _ = self.host.open_tab(&id, title);
+            let _ = if id == DIAGRAM {
+                self.host.open_tab(&id, title)
+            } else {
+                self.host.open_dialog(&id, title)
+            };
         }
         for id in closes {
             self.host.close_tab(&id);
@@ -353,27 +457,63 @@ impl Shared {
     }
 }
 
+/// The windows of the tool, their titles and whether each is wanted now.
+#[cfg(test)]
+pub fn window_titles(app: &App) -> Vec<(&'static str, String, bool)> {
+    windows(app)
+}
+
 /// The windows of the tool and whether each is wanted now.
 fn windows(app: &App) -> Vec<(&'static str, String, bool)> {
     let db = &app.db;
     vec![
-        (DIALOG, t!("db.connection").to_string(), db.dialog.is_some()),
+        (
+            DIALOG,
+            match &db.dialog {
+                Some(d) if d.editing.is_some() => t!("db.dialog_edit").to_string(),
+                _ => t!("db.dialog_new").to_string(),
+            },
+            db.dialog.is_some(),
+        ),
         (
             DESIGNER,
-            t!("db.table_modify").to_string(),
+            db.designer
+                .as_ref()
+                .map_or_else(|| t!("db.table_modify").to_string(), admin::designer_title),
             db.designer.is_some(),
         ),
-        (HEALTH, t!("db.health").to_string(), db.health.is_some()),
-        (IMPORT, t!("db.import").to_string(), db.import.is_some()),
+        (
+            HEALTH,
+            db.health
+                .as_ref()
+                .map_or_else(|| t!("db.health").to_string(), admin::health_title),
+            db.health.is_some(),
+        ),
+        (
+            IMPORT,
+            db.import
+                .as_ref()
+                .map_or_else(|| t!("db.import").to_string(), admin::import_title),
+            db.import.is_some(),
+        ),
         (
             COPY,
-            t!("db.copy_table").to_string(),
+            db.copy_table.as_ref().map_or_else(
+                || t!("db.copy_table").to_string(),
+                |c| admin::copy_title(db, c),
+            ),
             db.copy_table.is_some(),
         ),
-        (BACKUP, t!("db.backup").to_string(), db.backup.is_some()),
+        (
+            BACKUP,
+            db.backup
+                .as_ref()
+                .map_or_else(|| t!("db.backup").to_string(), admin::backup_title),
+            db.backup.is_some(),
+        ),
         (
             TEXT,
-            t!("db.text_title").to_string(),
+            admin::small_title(db),
             db.text.is_some()
                 || db.links.is_some()
                 || db.new_schema.is_some()
@@ -438,6 +578,7 @@ impl Plugin for DbPlugin {
                 app: App::new(),
                 panels: HashMap::new(),
                 open_tabs: Default::default(),
+                titles: Default::default(),
                 dark: params.settings.dark,
             })),
             host: host.clone(),

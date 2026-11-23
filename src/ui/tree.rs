@@ -2,7 +2,9 @@
 //! schemas, tables (and what a table is made of), functions, sequences and
 //! types; under the tree, what can be done to the node picked.
 
-use ardoise_plugin::ui::{column, row, scroll, separator, text, tree, Node, TextStyle, TreeItem};
+use ardoise_plugin::ui::{
+    column, fill, row, scroll, separator, text, tree, ButtonStyle, Node, TextStyle, TreeItem,
+};
 
 use super::Ui;
 use crate::app::App;
@@ -20,13 +22,25 @@ fn glyph(kind: Kind) -> &'static str {
 
 pub fn view(ui: &mut Ui, app: &App) -> Node {
     let state = &app.db;
-    let mut header = vec![
-        text(t!("sidebar.database").to_uppercase()).style(TextStyle::Muted),
-        ui.tool(t!("db.console").to_string(), DbMsg::ToggleConsole),
-        ui.tool(format!("+ {}", t!("db.add")), DbMsg::OpenDialog(None)),
+    // The title, then the pictos: add (the accent), console, refresh, fold.
+    let header = vec![
+        text(t!("sidebar.database").to_string()).style(TextStyle::Bold),
+        fill(),
+        ui.icon_tool("plus", t!("db.add").to_string(), DbMsg::OpenDialog(None))
+            .button_style(ButtonStyle::Primary),
+        ui.icon_tool(
+            "terminal",
+            t!("db.console").to_string(),
+            DbMsg::ToggleConsole,
+        ),
+        ui.icon_tool("refresh-cw", t!("db.refresh").to_string(), DbMsg::ReloadAll),
+        ui.icon_tool(
+            "chevrons-up-down",
+            t!("db.collapse_all").to_string(),
+            DbMsg::CollapseAll,
+        ),
     ];
     if state.connections.is_empty() {
-        header.push(text(""));
         return column([
             row(header).spacing(4.0),
             text(t!("db.empty").to_string()).style(TextStyle::Muted),
@@ -262,10 +276,22 @@ fn actions(ui: &mut Ui, app: &App, picked: &Picked) -> Node {
     let mut out = Vec::new();
     match picked.clone() {
         Picked::Connection(id) => {
-            out.push(ui.tool(t!("db.refresh").to_string(), DbMsg::Reload(id)));
-            out.push(ui.tool(t!("db.edit").to_string(), DbMsg::OpenDialog(Some(id))));
-            out.push(ui.tool(t!("db.duplicate").to_string(), DbMsg::Duplicate(id)));
-            out.push(ui.tool(t!("db.console").to_string(), DbMsg::ConsoleConnection(id)));
+            out.push(ui.icon_tool(
+                "refresh-cw",
+                t!("db.refresh").to_string(),
+                DbMsg::Reload(id),
+            ));
+            out.push(ui.icon_tool(
+                "pencil",
+                t!("db.edit").to_string(),
+                DbMsg::OpenDialog(Some(id)),
+            ));
+            out.push(ui.icon_tool("copy", t!("db.duplicate").to_string(), DbMsg::Duplicate(id)));
+            out.push(ui.icon_tool(
+                "terminal",
+                t!("db.console").to_string(),
+                DbMsg::ConsoleConnection(id),
+            ));
         }
         Picked::Database(id, database) => {
             out.push(ui.tool(

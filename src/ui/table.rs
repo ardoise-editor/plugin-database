@@ -212,7 +212,11 @@ pub fn view(ui: &mut Ui, path: &Path, tab: &TableTab) -> Node {
         ));
     }
     if tab.editable() {
-        bar.push(ui.tool(format!("+ {}", t!("db.row_add")), DbMsg::AddRow(owned())));
+        bar.push(
+            ui.tool(t!("db.row_add").to_string(), DbMsg::AddRow(owned()))
+                .icon("plus")
+                .with_label(),
+        );
     }
     if is_query {
         if let Some(sql) = &tab.query {
@@ -256,10 +260,11 @@ pub fn view(ui: &mut Ui, path: &Path, tab: &TableTab) -> Node {
         ));
     }
     if tab.loading && tab.stop.is_some() {
-        bar.push(ui.tool(
-            format!("■ {}", t!("db.stop_load")),
-            DbMsg::StopLoad(owned()),
-        ));
+        bar.push(
+            ui.tool(t!("db.stop_load").to_string(), DbMsg::StopLoad(owned()))
+                .icon("square")
+                .with_label(),
+        );
     }
     if tab.query.is_none() || tab.paged {
         let ready = !tab.loading && tab.error.is_none();
@@ -296,7 +301,7 @@ pub fn view(ui: &mut Ui, path: &Path, tab: &TableTab) -> Node {
             ),
         ];
         if tab.is_filtered() {
-            line.push(ui.tool("×", DbMsg::ClearFilter(owned())));
+            line.push(ui.icon_tool("x", t!("db.close").to_string(), DbMsg::ClearFilter(owned())));
         }
         page.push(row(line).spacing(6.0));
     }
@@ -305,7 +310,11 @@ pub fn view(ui: &mut Ui, path: &Path, tab: &TableTab) -> Node {
         page.push(
             row([
                 text(notice.clone()).style(TextStyle::Error),
-                ui.tool("×", DbMsg::DismissNotice(owned())),
+                ui.icon_tool(
+                    "x",
+                    t!("db.close").to_string(),
+                    DbMsg::DismissNotice(owned()),
+                ),
             ])
             .spacing(6.0),
         );
@@ -416,7 +425,7 @@ fn form(ui: &mut Ui, path: &Path, tab: &TableTab, r: usize) -> Node {
                 .style(TextStyle::Heading),
             ui.button_if("‹", (r > 0).then(|| DbMsg::FormMove(owned(), -1))),
             ui.button_if("›", (r + 1 < count).then(|| DbMsg::FormMove(owned(), 1))),
-            ui.tool("×", DbMsg::CloseForm(owned())),
+            ui.icon_tool("x", t!("db.close").to_string(), DbMsg::CloseForm(owned())),
         ])
         .spacing(6.0),
         scroll(column(fields).spacing(6.0)).height(320.0),
@@ -435,7 +444,11 @@ fn preview(ui: &mut Ui, path: &Path, tab: &TableTab) -> Node {
     let mut lines = vec![
         row([
             text(t!("db.preview_title").to_string()).style(TextStyle::Heading),
-            ui.tool("×", DbMsg::Preview(path.to_path_buf(), false)),
+            ui.icon_tool(
+                "x",
+                t!("db.close").to_string(),
+                DbMsg::Preview(path.to_path_buf(), false),
+            ),
         ])
         .spacing(6.0),
         text(t!("db.preview_hint").to_string()).style(TextStyle::Muted),

@@ -4,7 +4,7 @@
 //! new schema), a text to read whole and the rows a row is linked to.
 
 use ardoise_plugin::ui::{
-    column, image, row, scroll, separator, text, ButtonStyle, Node, TextStyle,
+    column, fill, footer, image, row, scroll, text, ButtonStyle, Node, TextStyle,
 };
 
 use super::Ui;
@@ -26,6 +26,85 @@ fn heading(label: String) -> Node {
 
 fn muted(label: String) -> Node {
     text(label).style(TextStyle::Muted)
+}
+
+// ─── The titles of the windows (the frame of the popin draws them) ─────────
+
+pub fn designer_title(d: &Designer) -> String {
+    if d.creating {
+        t!("db.designer_new_title", schema = d.schema.as_str()).to_string()
+    } else {
+        let full = format!("{}.{}", d.schema, d.table);
+        t!("db.designer_title", name = full.as_str()).to_string()
+    }
+}
+
+pub fn health_title(view: &HealthView) -> String {
+    t!("db.health_title", name = view.database.as_str()).to_string()
+}
+
+pub fn import_title(im: &Import) -> String {
+    t!("db.import_title", table = im.table.as_str()).to_string()
+}
+
+pub fn copy_title(state: &State, copy: &CopyTable) -> String {
+    let source = state
+        .connections
+        .iter()
+        .find(|c| c.id == copy.from.0)
+        .map(|c| c.label())
+        .unwrap_or_default();
+    t!(
+        "db.copy_title",
+        table = copy.from.3.as_str(),
+        source = source.as_str()
+    )
+    .to_string()
+}
+
+pub fn backup_title(b: &crate::database::Backup) -> String {
+    let scope = if !b.table.is_empty() {
+        format!("{}.{}", b.schema, b.table)
+    } else if !b.schema.is_empty() {
+        b.schema.clone()
+    } else {
+        b.database.clone()
+    };
+    if b.restore {
+        t!("db.restore_title", database = b.database.as_str()).to_string()
+    } else {
+        t!("db.backup_title", scope = scope.as_str()).to_string()
+    }
+}
+
+/// The title of what waits for an answer, in the order `small` shows them.
+pub fn small_title(state: &State) -> String {
+    if let Some(c) = &state.confirm {
+        let name = format!("{}.{}", c.schema, c.table);
+        return match c.action {
+            ConfirmAction::Drop => t!("db.confirm_drop_title", name = name.as_str()),
+            ConfirmAction::Empty => t!("db.confirm_empty_title", name = name.as_str()),
+        }
+        .to_string();
+    }
+    if let Some(t) = &state.ssh_trust {
+        return t!("db.ssh_trust_title", host = t.host.as_str(), port = t.port).to_string();
+    }
+    if state.new_schema.is_some() {
+        return t!("db.new_schema_title").to_string();
+    }
+    if state.links.is_some() {
+        return t!("db.links_title").to_string();
+    }
+    match &state.text {
+        Some(view) => view.title.clone(),
+        None => t!("db.text_title").to_string(),
+    }
+}
+
+/// A control with its label above it (small, muted).
+fn labelled(label: String, node: Node) -> Node {
+    column([muted(label), node]).spacing(4.0)
 }
 
 fn kind_name(kind: Kind) -> String {
@@ -79,21 +158,9 @@ fn constraint_label(kind: ConstraintKind) -> String {
 }
 
 pub fn designer(ui: &mut Ui, d: &Designer) -> Node {
-    let title = if d.creating {
-        t!("db.designer_new_title", schema = d.schema.as_str()).to_string()
-    } else {
-        let full = format!("{}.{}", d.schema, d.table);
-        t!("db.designer_title", name = full.as_str()).to_string()
-    };
-    let mut tabs = Vec::new();
-    for tab in DesignerTab::ALL {
-        let b = ui.button(tab_label(tab), say(DesignerMsg::Tab(tab)));
-        tabs.push(if d.tab == tab {
-            b.button_style(ButtonStyle::Primary)
-        } else {
-            b.button_style(ButtonStyle::Ghost)
-        });
-    }
+    let tabs = ui.tabs("designer_tab", &DesignerTab::ALL, d.tab, tab_label, |tab| {
+        say(DesignerMsg::Tab(tab))
+    });
     let content = if d.load == Load::Loading {
         muted(t!("db.designer_loading").to_string())
     } else {
@@ -120,21 +187,19 @@ pub fn designer(ui: &mut Ui, d: &Designer) -> Node {
         t!("db.dapply")
     };
     column([
-        heading(title),
-        row(tabs).spacing(2.0),
-        separator(),
+        tabs,
         scroll(content),
-        separator(),
-        row([
-            ui.button_if(apply.to_string(), ready.then_some(say(DesignerMsg::Apply)))
-                .button_style(ButtonStyle::Primary),
-            ui.tool(t!("db.cancel_dialog").to_string(), say(DesignerMsg::Close)),
-            status,
-        ])
-        .spacing(8.0),
+        status,
+        footer(
+            [],
+            [
+                ui.button(t!("db.cancel_dialog").to_string(), say(DesignerMsg::Close)),
+                ui.button_if(apply.to_string(), ready.then_some(say(DesignerMsg::Apply)))
+                    .button_style(ButtonStyle::Primary),
+            ],
+        ),
     ])
-    .spacing(8.0)
-    .padding(12.0)
+    .spacing(12.0)
 }
 
 fn columns_tab(ui: &mut Ui, d: &Designer) -> Node {
@@ -157,8 +222,9 @@ fn columns_tab(ui: &mut Ui, d: &Designer) -> Node {
                     muted(c.name.clone()),
                     muted(c.kind.clone()),
                     text(t!("db.ddropped").to_string()).style(TextStyle::Error),
-                    ui.tool(
-                        format!("↺ {}", t!("db.drestore")),
+                    ui.icon_tool(
+                        "rotate-ccw",
+                        t!("db.drestore").to_string(),
                         say(DesignerMsg::ColDrop(i, false)),
                     ),
                 ])
@@ -195,8 +261,9 @@ fn columns_tab(ui: &mut Ui, d: &Designer) -> Node {
                 ui.input(&format!("col_comment_{i}"), &c.comment, "", move |t| {
                     say(DesignerMsg::Col(i, ColField::Comment, t))
                 }),
-                ui.tool(
-                    format!("× {}", t!("db.ddrop")),
+                ui.icon_tool(
+                    "trash-2",
+                    t!("db.ddrop").to_string(),
                     say(DesignerMsg::ColDrop(i, true)),
                 ),
             ])
@@ -215,7 +282,11 @@ fn columns_tab(ui: &mut Ui, d: &Designer) -> Node {
             );
         }
     }
-    list.push(ui.tool(format!("+ {}", t!("db.dcol_add")), say(DesignerMsg::ColAdd)));
+    list.push(
+        ui.tool(t!("db.dcol_add").to_string(), say(DesignerMsg::ColAdd))
+            .icon("plus")
+            .with_label(),
+    );
     list.push(muted(t!("db.dcol_order_note").to_string()));
     column(list).spacing(6.0)
 }
@@ -235,13 +306,15 @@ fn constraints_tab(ui: &mut Ui, d: &Designer) -> Node {
                     text(original.name.clone()).style(style),
                     text(original.definition.clone()).style(TextStyle::Mono),
                     if c.dropped {
-                        ui.tool(
-                            format!("↺ {}", t!("db.drestore")),
+                        ui.icon_tool(
+                            "rotate-ccw",
+                            t!("db.drestore").to_string(),
                             say(DesignerMsg::ConDrop(i, false)),
                         )
                     } else {
-                        ui.tool(
-                            format!("× {}", t!("db.ddrop")),
+                        ui.icon_tool(
+                            "trash-2",
+                            t!("db.ddrop").to_string(),
                             say(DesignerMsg::ConDrop(i, true)),
                         )
                     },
@@ -306,7 +379,11 @@ fn constraints_tab(ui: &mut Ui, d: &Designer) -> Node {
         } else {
             t!("db.dremove")
         };
-        line.push(ui.tool(format!("× {remove}"), say(DesignerMsg::ConDrop(i, true))));
+        line.push(ui.icon_tool(
+            "trash-2",
+            remove.to_string(),
+            say(DesignerMsg::ConDrop(i, true)),
+        ));
         list.push(row(line).spacing(6.0));
     }
     list.push(
@@ -346,13 +423,15 @@ fn indexes_tab(ui: &mut Ui, d: &Designer) -> Node {
                     }),
                     text(original.definition.clone()).style(TextStyle::Mono),
                     if x.dropped {
-                        ui.tool(
-                            format!("↺ {}", t!("db.drestore")),
+                        ui.icon_tool(
+                            "rotate-ccw",
+                            t!("db.drestore").to_string(),
                             say(DesignerMsg::IdxDrop(i, false)),
                         )
                     } else {
-                        ui.tool(
-                            format!("× {}", t!("db.ddrop")),
+                        ui.icon_tool(
+                            "trash-2",
+                            t!("db.ddrop").to_string(),
                             say(DesignerMsg::IdxDrop(i, true)),
                         )
                     },
@@ -386,12 +465,20 @@ fn indexes_tab(ui: &mut Ui, d: &Designer) -> Node {
                     x.unique,
                     move |on| say(DesignerMsg::IdxUnique(i, on)),
                 ),
-                ui.tool(format!("× {remove}"), say(DesignerMsg::IdxDrop(i, true))),
+                ui.icon_tool(
+                    "trash-2",
+                    remove.to_string(),
+                    say(DesignerMsg::IdxDrop(i, true)),
+                ),
             ])
             .spacing(6.0),
         );
     }
-    list.push(ui.tool(format!("+ {}", t!("db.didx_add")), say(DesignerMsg::IdxAdd)));
+    list.push(
+        ui.tool(t!("db.didx_add").to_string(), say(DesignerMsg::IdxAdd))
+            .icon("plus")
+            .with_label(),
+    );
     column(list).spacing(6.0)
 }
 
@@ -437,33 +524,29 @@ fn sql_tab(d: &Designer) -> Node {
 // ─── Health ────────────────────────────────────────────────────────────────
 
 pub fn health(ui: &mut Ui, view: &HealthView) -> Node {
-    let mut head = vec![heading(
-        t!("db.health_title", name = view.database.as_str()).to_string(),
-    )];
+    let mut head = Vec::new();
     if let Some(data) = &view.data {
         head.push(muted(human_size(data.database_size)));
     }
+    head.push(fill());
     head.push(
-        ui.button_if(
-            "⟳",
+        ui.icon_tool_if(
+            "refresh-cw",
+            t!("db.refresh").to_string(),
             (!view.loading && view.running.is_none())
                 .then(|| DbMsg::OpenHealth(view.conn, view.database.clone())),
         ),
     );
-    head.push(ui.tool("×", DbMsg::HealthClose));
-    let tab = |ui: &mut Ui, label: String, which: HealthTab| {
-        let b = ui.button(label, DbMsg::HealthTab(which));
-        if view.tab == which {
-            b.button_style(ButtonStyle::Primary)
-        } else {
-            b.button_style(ButtonStyle::Ghost)
-        }
-    };
-    let tabs = row([
-        tab(ui, t!("db.health_tables").to_string(), HealthTab::Tables),
-        tab(ui, t!("db.health_indexes").to_string(), HealthTab::Indexes),
-    ])
-    .spacing(2.0);
+    let tabs = ui.tabs(
+        "health_tab",
+        &HealthTab::ALL,
+        view.tab,
+        |tab| match tab {
+            HealthTab::Tables => t!("db.health_tables").to_string(),
+            HealthTab::Indexes => t!("db.health_indexes").to_string(),
+        },
+        DbMsg::HealthTab,
+    );
     let mut list = Vec::new();
     match (&view.data, view.tab) {
         (None, _) => list.push(muted(if view.loading {
@@ -551,9 +634,8 @@ pub fn health(ui: &mut Ui, view: &HealthView) -> Node {
         }
     }
     let mut body = vec![
-        row(head).spacing(8.0),
         tabs,
-        separator(),
+        row(head).spacing(8.0),
         scroll(column(list).spacing(4.0)),
     ];
     if let Some(running) = &view.running {
@@ -562,28 +644,25 @@ pub fn health(ui: &mut Ui, view: &HealthView) -> Node {
     if let Some(error) = &view.error {
         body.push(text(error.clone()).style(TextStyle::Error));
     }
-    column(body).spacing(8.0).padding(12.0)
+    column(body).spacing(12.0)
 }
 
 // ─── Import ────────────────────────────────────────────────────────────────
 
 pub fn import(ui: &mut Ui, im: &Import) -> Node {
-    let mut body = vec![
-        heading(t!("db.import_title", table = im.table.as_str()).to_string()),
-        row([
-            ui.button_if(
-                t!("db.import_choose").to_string(),
-                (!im.running).then_some(DbMsg::ImportPick),
-            ),
-            muted(
-                im.path
-                    .as_ref()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_default(),
-            ),
-        ])
-        .spacing(8.0),
-    ];
+    let mut body = vec![row([
+        ui.button_if(
+            t!("db.import_choose").to_string(),
+            (!im.running).then_some(DbMsg::ImportPick),
+        ),
+        muted(
+            im.path
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
+        ),
+    ])
+    .spacing(8.0)];
     if im.path.is_some() {
         let format = |ui: &mut Ui, label: &str, which: Format| {
             let b = ui.button(label, DbMsg::ImportFormat(which));
@@ -683,23 +762,21 @@ pub fn import(ui: &mut Ui, im: &Import) -> Node {
         body.push(text(t!("db.import_done", n = n).to_string()));
     }
     let ready = im.path.is_some() && im.mapping.iter().any(Option::is_some) && !im.running;
-    body.push(
-        row([
+    if im.running {
+        body.push(muted(t!("db.import_running").to_string()));
+    }
+    body.push(footer(
+        [],
+        [
+            ui.button(t!("db.cancel_dialog").to_string(), DbMsg::ImportClose),
             ui.button_if(
                 t!("db.import_run").to_string(),
                 ready.then_some(DbMsg::ImportRun),
             )
             .button_style(ButtonStyle::Primary),
-            ui.tool(t!("db.cancel_dialog").to_string(), DbMsg::ImportClose),
-            muted(if im.running {
-                t!("db.import_running").to_string()
-            } else {
-                String::new()
-            }),
-        ])
-        .spacing(8.0),
-    );
-    column(body).spacing(8.0).padding(12.0)
+        ],
+    ));
+    column(body).spacing(12.0)
 }
 
 // ─── Copy of a table ───────────────────────────────────────────────────────
@@ -713,33 +790,19 @@ pub fn copy(ui: &mut Ui, state: &State, copy: &CopyTable) -> Node {
     let chosen = copy
         .dest
         .and_then(|id| names.iter().find(|(i, _)| *i == id).map(|(_, l)| l.clone()));
-    let source = names
-        .iter()
-        .find(|(i, _)| *i == copy.from.0)
-        .map(|(_, l)| l.clone())
-        .unwrap_or_default();
     let options: Vec<String> = names.iter().map(|(_, l)| l.clone()).collect();
     let field = |ui: &mut Ui, label: String, value: &str, hint: String, which: CopyField| {
-        row([
-            text(label),
+        labelled(
+            label,
             ui.input(&format!("copy_{which:?}"), value, hint, move |t| {
                 DbMsg::CopyField(which, t)
             }),
-        ])
-        .spacing(8.0)
+        )
     };
     let ready = copy.dest.is_some() && !copy.name.trim().is_empty() && !copy.running;
     let mut body = vec![
-        heading(
-            t!(
-                "db.copy_title",
-                table = copy.from.3.as_str(),
-                source = source.as_str()
-            )
-            .to_string(),
-        ),
-        row([
-            text(t!("db.copy_to").to_string()),
+        labelled(
+            t!("db.copy_to").to_string(),
             ui.select("copy_dest", options, chosen, move |label| {
                 DbMsg::CopyDest(
                     names
@@ -748,8 +811,7 @@ pub fn copy(ui: &mut Ui, state: &State, copy: &CopyTable) -> Node {
                         .map_or(0, |(i, _)| *i),
                 )
             }),
-        ])
-        .spacing(8.0),
+        ),
         field(
             ui,
             t!("db.copy_database").to_string(),
@@ -785,40 +847,26 @@ pub fn copy(ui: &mut Ui, state: &State, copy: &CopyTable) -> Node {
     if let Some(rows) = copy.copied {
         body.push(text(t!("db.copy_done", n = rows).to_string()));
     }
-    body.push(
-        row([
+    if copy.running {
+        body.push(muted(t!("db.copy_running").to_string()));
+    }
+    body.push(footer(
+        [],
+        [
+            ui.button(t!("db.cancel_dialog").to_string(), DbMsg::CopyClose),
             ui.button_if(
                 t!("db.copy_run").to_string(),
                 ready.then_some(DbMsg::CopyRun),
             )
             .button_style(ButtonStyle::Primary),
-            ui.tool(t!("db.cancel_dialog").to_string(), DbMsg::CopyClose),
-            muted(if copy.running {
-                t!("db.copy_running").to_string()
-            } else {
-                String::new()
-            }),
-        ])
-        .spacing(8.0),
-    );
-    column(body).spacing(8.0).padding(12.0)
+        ],
+    ));
+    column(body).spacing(12.0)
 }
 
 // ─── Backup and restore ────────────────────────────────────────────────────
 
 pub fn backup(ui: &mut Ui, b: &crate::database::Backup) -> Node {
-    let scope = if !b.table.is_empty() {
-        format!("{}.{}", b.schema, b.table)
-    } else if !b.schema.is_empty() {
-        b.schema.clone()
-    } else {
-        b.database.clone()
-    };
-    let title = if b.restore {
-        t!("db.restore_title", database = b.database.as_str()).to_string()
-    } else {
-        t!("db.backup_title", scope = scope.as_str()).to_string()
-    };
     let flag = |ui: &mut Ui, label: String, on: bool, which: BackupFlag| {
         ui.checkbox(&format!("backup_{which:?}"), label, on, move |v| {
             DbMsg::BackupFlag(which, v)
@@ -875,7 +923,6 @@ pub fn backup(ui: &mut Ui, b: &crate::database::Backup) -> Node {
         ));
     }
     let mut body = vec![
-        heading(title),
         column(options).spacing(6.0),
         row([
             ui.button_if(
@@ -909,46 +956,42 @@ pub fn backup(ui: &mut Ui, b: &crate::database::Backup) -> Node {
     } else {
         t!("db.backup_run")
     };
-    body.push(
-        row([
+    if b.running {
+        body.push(muted(t!("db.backup_running").to_string()));
+    }
+    body.push(footer(
+        [],
+        [
+            ui.button(t!("db.cancel_dialog").to_string(), DbMsg::BackupClose),
             ui.button_if(
                 run.to_string(),
                 (b.path.is_some() && !b.running).then_some(DbMsg::BackupRun),
             )
             .button_style(ButtonStyle::Primary),
-            ui.tool(t!("db.cancel_dialog").to_string(), DbMsg::BackupClose),
-            muted(if b.running {
-                t!("db.backup_running").to_string()
-            } else {
-                String::new()
-            }),
-        ])
-        .spacing(8.0),
-    );
-    column(body).spacing(8.0).padding(12.0)
+        ],
+    ));
+    column(body).spacing(12.0)
 }
 
 // ─── What waits for an answer, a text, the linked rows ─────────────────────
 
+/// What waits for an answer, one at a time (the next shows when this one is
+/// answered): a drop, an SSH key, a new schema, the rows linked, a text.
 pub fn small(ui: &mut Ui, state: &State) -> Node {
-    let mut out = Vec::new();
     if let Some(c) = &state.confirm {
         let name = format!("{}.{}", c.schema, c.table);
-        let (title, message, action) = match c.action {
+        let (message, action) = match c.action {
             ConfirmAction::Drop => (
-                t!("db.confirm_drop_title", name = name.as_str()).to_string(),
                 t!("db.confirm_drop_text", kind = kind_name(c.kind).as_str()).to_string(),
                 t!("db.confirm_drop_button").to_string(),
             ),
             ConfirmAction::Empty => (
-                t!("db.confirm_empty_title", name = name.as_str()).to_string(),
                 t!("db.confirm_empty_text").to_string(),
                 t!("db.confirm_empty_button").to_string(),
             ),
         };
-        out.push(heading(title));
-        out.push(muted(message));
-        out.push(text(c.statement()).style(TextStyle::Mono));
+        let _ = name;
+        let mut out = vec![muted(message), text(c.statement()).style(TextStyle::Mono)];
         if c.action == ConfirmAction::Drop && c.dialect == protocol::Dialect::Postgres {
             out.push(ui.checkbox(
                 "cascade",
@@ -960,26 +1003,21 @@ pub fn small(ui: &mut Ui, state: &State) -> Node {
         if let Some(error) = &c.error {
             out.push(text(error.clone()).style(TextStyle::Error));
         }
-        out.push(
-            row([
+        if c.running {
+            out.push(muted(t!("db.confirm_running").to_string()));
+        }
+        out.push(footer(
+            [],
+            [
+                ui.button(t!("db.guard_cancel").to_string(), DbMsg::ConfirmClose),
                 ui.button_if(action, (!c.running).then_some(DbMsg::ConfirmRun))
                     .button_style(ButtonStyle::Danger),
-                ui.tool(t!("db.guard_cancel").to_string(), DbMsg::ConfirmClose),
-                muted(if c.running {
-                    t!("db.confirm_running").to_string()
-                } else {
-                    String::new()
-                }),
-            ])
-            .spacing(8.0),
-        );
-        out.push(separator());
+            ],
+        ));
+        return column(out).spacing(12.0);
     }
     if let Some(t) = &state.ssh_trust {
-        out.push(heading(
-            t!("db.ssh_trust_title", host = t.host.as_str(), port = t.port).to_string(),
-        ));
-        out.push(muted(t!("db.ssh_trust_text").to_string()));
+        let mut out = vec![muted(t!("db.ssh_trust_text").to_string())];
         for key in &t.keys {
             out.push(text(key.fingerprint.clone()).style(TextStyle::Mono));
         }
@@ -989,52 +1027,45 @@ pub fn small(ui: &mut Ui, state: &State) -> Node {
         if let Some(error) = &t.error {
             out.push(text(error.clone()).style(TextStyle::Error));
         }
-        out.push(
-            row([
+        out.push(footer(
+            [],
+            [
+                ui.button(t!("db.guard_cancel").to_string(), DbMsg::SshTrustNo),
                 ui.button_if(
                     t!("db.ssh_trust_yes").to_string(),
                     (!t.keys.is_empty()).then_some(DbMsg::SshTrustYes),
                 )
                 .button_style(ButtonStyle::Primary),
-                ui.tool(t!("db.guard_cancel").to_string(), DbMsg::SshTrustNo),
-            ])
-            .spacing(8.0),
-        );
-        out.push(separator());
+            ],
+        ));
+        return column(out).spacing(12.0);
     }
     if let Some(n) = &state.new_schema {
-        out.push(heading(t!("db.new_schema_title").to_string()));
         let field = ui.input(
             "schema_name",
             &n.name,
             t!("db.new_schema_name"),
             DbMsg::SchemaName,
         );
-        out.push(ui.submit(field, DbMsg::SchemaCreate));
+        let mut out = vec![ui.submit(field, DbMsg::SchemaCreate)];
         if let Some(error) = &n.error {
             out.push(text(error.clone()).style(TextStyle::Error));
         }
-        out.push(
-            row([
+        out.push(footer(
+            [],
+            [
+                ui.button(t!("db.guard_cancel").to_string(), DbMsg::SchemaClose),
                 ui.button_if(
                     t!("db.dcreate").to_string(),
                     (!n.running && !n.name.trim().is_empty()).then_some(DbMsg::SchemaCreate),
                 )
                 .button_style(ButtonStyle::Primary),
-                ui.tool(t!("db.guard_cancel").to_string(), DbMsg::SchemaClose),
-            ])
-            .spacing(8.0),
-        );
-        out.push(separator());
+            ],
+        ));
+        return column(out).spacing(12.0);
     }
+    let mut out = Vec::new();
     if let Some(view) = &state.links {
-        out.push(
-            row([
-                heading(t!("db.links_title").to_string()),
-                ui.tool("×", DbMsg::CloseLinks),
-            ])
-            .spacing(8.0),
-        );
         for (outgoing, title, hint) in [
             (
                 true,
@@ -1075,20 +1106,22 @@ pub fn small(ui: &mut Ui, state: &State) -> Node {
                 ));
             }
         }
-        out.push(separator());
+        return column(out).spacing(8.0);
     }
     if let Some(view) = &state.text {
-        out.push(row([heading(view.title.clone()), ui.tool("×", DbMsg::TextClose)]).spacing(8.0));
-        out.push(scroll(text(view.text.clone()).style(TextStyle::Mono)));
-        out.push(
-            row([
-                ui.tool(t!("db.text_copy").to_string(), DbMsg::TextCopy),
-                muted(t!("db.text_size", n = view.text.chars().count()).to_string()),
-            ])
-            .spacing(8.0),
-        );
+        out.push(scroll(text(view.text.clone()).style(TextStyle::Mono)).height(320.0));
+        out.push(muted(
+            t!("db.text_size", n = view.text.chars().count()).to_string(),
+        ));
+        out.push(footer(
+            [
+                ui.icon_tool("copy", t!("db.text_copy").to_string(), DbMsg::TextCopy)
+                    .button_style(ButtonStyle::Outline),
+            ],
+            [],
+        ));
     }
-    column(out).spacing(8.0).padding(12.0)
+    column(out).spacing(12.0)
 }
 
 // ─── Diagram ───────────────────────────────────────────────────────────────
