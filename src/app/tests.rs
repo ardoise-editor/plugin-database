@@ -1596,6 +1596,53 @@ fn closing_the_text_window_answers_one_question_at_a_time() {
     assert!(!app.close_window(Window::Text));
 }
 
+/// The buttons of the console that are on, by label, in what it shows.
+fn console_buttons_on(app: &App) -> Vec<String> {
+    use crate::ui::{console, Ui};
+    let json = serde_json::to_value(console::view(&mut Ui::new(true), app)).unwrap();
+    let mut buttons = Vec::new();
+    nodes(&json, "button", &mut buttons);
+    buttons
+        .iter()
+        .filter(|b| b.get("enabled").and_then(|e| e.as_bool()).unwrap_or(true))
+        .filter_map(|b| b["label"].as_str().map(str::to_string))
+        .collect()
+}
+
+#[test]
+fn the_buttons_of_the_console_wake_up_with_a_query_to_run() {
+    let (mut app, _path) = db_app(true);
+    app.db.set_driver(
+        crate::database::protocol::Dialect::Postgres,
+        crate::database::Driver::Ready,
+    );
+    let _ = app.update(Message::Db(DbMsg::ToggleConsole));
+    assert!(app.db.console.connection.is_some());
+    let runs = [
+        t!("db.run").to_string(),
+        t!("db.format").to_string(),
+        t!("db.explain").to_string(),
+        t!("db.explain_analyze").to_string(),
+        t!("db.run_all").to_string(),
+    ];
+    // An empty editor (what other tests saved is not read back here):
+    // nothing to run, format or explain.
+    let _ = app.update(Message::Db(DbMsg::SqlText(String::new())));
+    let on = console_buttons_on(&app);
+    for label in &runs {
+        assert!(!on.contains(label), "{label} is off with nothing typed");
+    }
+    // Something typed: they are on.
+    let _ = app.update(Message::Db(DbMsg::SqlText("select 1".into())));
+    let on = console_buttons_on(&app);
+    for label in &runs {
+        assert!(on.contains(label), "{label} is on with a query");
+    }
+    // Blanks are nothing.
+    let _ = app.update(Message::Db(DbMsg::SqlText("  \n ".into())));
+    assert!(!console_buttons_on(&app).contains(&runs[0]));
+}
+
 #[test]
 fn each_window_has_the_picto_and_the_line_of_its_header() {
     let (mut app, _path) = db_app(true);

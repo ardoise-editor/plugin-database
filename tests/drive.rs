@@ -121,6 +121,22 @@ impl Editor {
             .is_some_and(|root| root.to_string().contains(needle))
     }
 
+    /// The action of the button labelled so, once it is on (a button that is
+    /// off has the action `none`).
+    fn action_on(&self, panel: &str, label: &str) -> Option<String> {
+        fn find(node: &Value, label: &str) -> Option<String> {
+            if node["label"] == label {
+                return node["action"].as_str().map(str::to_string);
+            }
+            match node {
+                Value::Object(map) => map.values().find_map(|v| find(v, label)),
+                Value::Array(list) => list.iter().find_map(|v| find(v, label)),
+                _ => None,
+            }
+        }
+        find(self.shown.get(panel)?, label).filter(|a| a != "none")
+    }
+
     /// The action of the button (or the id of the row) labelled so.
     fn action(&self, panel: &str, label: &str) -> String {
         fn find(node: &Value, label: &str) -> Option<String> {
@@ -221,6 +237,8 @@ fn a_sqlite_table_is_opened_edited_and_queried() {
     editor.until("the console", |e| e.shows("console", "\"sql\""));
     editor.sql = "SELECT name FROM items ORDER BY id".into();
     editor.event("console", "sql", json!(editor.sql.clone()));
+    // The buttons wake up with a query to run.
+    editor.until("Run on", |e| e.action_on("console", "Run").is_some());
     let run = editor.action("console", "Run");
     editor.event("console", &run, Value::Null);
     editor.until("the result", |e| {

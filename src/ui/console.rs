@@ -78,23 +78,36 @@ pub fn view(ui: &mut Ui, app: &App) -> Node {
             if c.running {
                 header.push(ui.icon_tool("square", t!("db.cancel").to_string(), DbMsg::Cancel));
             }
+            // Nothing runs without a data source and something to run: the
+            // buttons wake up when there is.
+            let has_sql = !c.editor.text().trim().is_empty();
+            let can_run = ready && has_sql && c.connection.is_some();
             header.push(
-                ui.button_if(t!("db.run").to_string(), ready.then_some(DbMsg::Run(false)))
-                    .button_style(ardoise_plugin::ui::ButtonStyle::Primary)
-                    .icon("play"),
+                ui.button_if(
+                    t!("db.run").to_string(),
+                    can_run.then_some(DbMsg::Run(false)),
+                )
+                .button_style(ardoise_plugin::ui::ButtonStyle::Primary)
+                .icon("play"),
             );
-            header.push(ui.tool(t!("db.format").to_string(), DbMsg::FormatSql));
+            header.push(
+                ui.button_if(
+                    t!("db.format").to_string(),
+                    (has_sql && !c.running).then_some(DbMsg::FormatSql),
+                )
+                .button_style(ardoise_plugin::ui::ButtonStyle::Ghost),
+            );
             header.push(ui.button_if(
                 t!("db.explain").to_string(),
-                ready.then_some(DbMsg::Explain(false)),
+                can_run.then_some(DbMsg::Explain(false)),
             ));
             header.push(ui.button_if(
                 t!("db.explain_analyze").to_string(),
-                ready.then_some(DbMsg::Explain(true)),
+                can_run.then_some(DbMsg::Explain(true)),
             ));
             header.push(ui.button_if(
                 t!("db.run_all").to_string(),
-                ready.then_some(DbMsg::Run(true)),
+                can_run.then_some(DbMsg::Run(true)),
             ));
         }
         ConsoleTab::Log => {

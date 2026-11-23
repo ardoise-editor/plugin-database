@@ -3,7 +3,7 @@
 //! what the tool asks of the editor carried out.
 
 pub mod admin;
-mod console;
+pub mod console;
 pub mod dialog;
 mod table;
 pub mod tree;
