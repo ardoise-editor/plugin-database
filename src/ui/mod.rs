@@ -385,11 +385,11 @@ impl Shared {
         for (id, title, on) in &wanted {
             let open = state.open_tabs.contains(*id);
             if *on && !open {
-                opens.push((id.to_string(), title.clone()));
+                opens.push((id.to_string(), title.clone(), window_head(&state.app, id)));
             } else if *on && state.titles.get(*id) != Some(title) {
                 // Open, but with another title (the next of the questions):
                 // the editor renames it and brings it in front.
-                opens.push((id.to_string(), title.clone()));
+                opens.push((id.to_string(), title.clone(), window_head(&state.app, id)));
             } else if !*on && open {
                 closes.push(id.to_string());
             }
@@ -427,7 +427,7 @@ impl Shared {
             }
         }
         state.panels = panels;
-        for (id, title) in &opens {
+        for (id, title, _) in &opens {
             state.open_tabs.insert(id.clone());
             state.titles.insert(id.clone(), title.clone());
         }
@@ -444,16 +444,38 @@ impl Shared {
         }
         // The windows are popins over the editor, but the diagram, which is
         // read and compared with the tables, stays a tab.
-        for (id, title) in opens {
+        for (id, title, (icon, subtitle)) in opens {
             let _ = if id == DIAGRAM {
                 self.host.open_tab(&id, title)
             } else {
-                self.host.open_dialog(&id, title)
+                self.host.open_dialog_with(&id, title, icon, subtitle)
             };
         }
         for id in closes {
             self.host.close_tab(&id);
         }
+    }
+}
+
+/// The picto and the line under the title of a window, as its header shows
+/// them.
+pub fn window_head(app: &App, id: &str) -> (&'static str, String) {
+    let db = &app.db;
+    match id {
+        DIALOG => ("database", t!("db.sub_dialog").to_string()),
+        DESIGNER => ("table-2", t!("db.sub_designer").to_string()),
+        HEALTH => ("heart-pulse", t!("db.sub_health").to_string()),
+        IMPORT => ("file-input", t!("db.sub_import").to_string()),
+        COPY => ("copy-plus", t!("db.sub_copy").to_string()),
+        BACKUP if db.backup.as_ref().is_some_and(|b| b.restore) => {
+            ("archive-restore", t!("db.sub_restore").to_string())
+        }
+        BACKUP => ("hard-drive-download", t!("db.sub_backup").to_string()),
+        TEXT if db.confirm.is_some() => ("trash-2", t!("db.sub_confirm").to_string()),
+        TEXT if db.ssh_trust.is_some() => ("key-round", t!("db.sub_ssh").to_string()),
+        TEXT if db.new_schema.is_some() => ("folder-plus", t!("db.sub_schema").to_string()),
+        TEXT if db.links.is_some() => ("link", t!("db.sub_links").to_string()),
+        _ => ("file", t!("db.sub_text").to_string()),
     }
 }
 

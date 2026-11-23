@@ -1597,6 +1597,40 @@ fn closing_the_text_window_answers_one_question_at_a_time() {
 }
 
 #[test]
+fn each_window_has_the_picto_and_the_line_of_its_header() {
+    let (mut app, _path) = db_app(true);
+    let id = app.db.connections[0].id;
+    let head = |app: &App, window: &str| crate::ui::window_head(app, window);
+    assert_eq!(head(&app, crate::ui::DIALOG).0, "database");
+    assert_eq!(head(&app, crate::ui::DESIGNER).0, "table-2");
+    assert_eq!(head(&app, crate::ui::HEALTH).0, "heart-pulse");
+    assert_eq!(head(&app, crate::ui::IMPORT).0, "file-input");
+    assert_eq!(head(&app, crate::ui::COPY).0, "copy-plus");
+    assert_eq!(head(&app, crate::ui::BACKUP).0, "hard-drive-download");
+    // A question that removes something has the red picto of a loss.
+    let _ = app.update(Message::Db(DbMsg::AskEmpty(
+        id,
+        "shop".into(),
+        "public".into(),
+        "items".into(),
+    )));
+    let (icon, line) = head(&app, crate::ui::TEXT);
+    assert_eq!(icon, "trash-2");
+    assert_eq!(line, t!("db.sub_confirm").to_string());
+    // Every line says something, in both languages.
+    for window in [
+        crate::ui::DIALOG,
+        crate::ui::DESIGNER,
+        crate::ui::HEALTH,
+        crate::ui::IMPORT,
+        crate::ui::COPY,
+        crate::ui::BACKUP,
+    ] {
+        assert!(!head(&app, window).1.starts_with("db."));
+    }
+}
+
+#[test]
 fn every_window_but_the_diagram_is_a_popin_with_a_title_of_its_own() {
     let (mut app, _path) = db_app(true);
     let id = app.db.connections[0].id;
