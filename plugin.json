@@ -4,7 +4,7 @@
     "en": "Database",
     "fr": "Base de données"
   },
-  "version": "1.3.0",
+  "version": "1.4.0",
   "api": 1,
   "description": {
     "en": "PostgreSQL, MySQL / MariaDB and SQLite (through SSH and TLS): the tree of a data source, its tables in tabs to filter, sort and edit, a SQL console with completion, the table designer, the ER diagram, import, export, copy, backup and health",
