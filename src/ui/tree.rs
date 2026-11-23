@@ -24,7 +24,7 @@ pub fn view(ui: &mut Ui, app: &App) -> Node {
     let state = &app.db;
     // The title, then the pictos: add (the accent), console, refresh, fold.
     let header = vec![
-        text(t!("sidebar.database").to_string()).style(TextStyle::Bold),
+        // The title is the panel's own (its header), not repeated here.
         fill(),
         ui.icon_tool("plus", t!("db.add").to_string(), DbMsg::OpenDialog(None))
             .button_style(ButtonStyle::Primary),

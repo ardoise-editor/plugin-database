@@ -1610,6 +1610,60 @@ fn every_window_but_the_diagram_is_a_popin_with_a_title_of_its_own() {
     assert_eq!(dialog.1, t!("db.dialog_edit").to_string());
 }
 
+/// Writes what the plugin renders (the tree, the form of a new source and of
+/// one that exists, a question) as JSON, to look at it in the editor without
+/// a screen: `UI_DUMP=/tmp/ui cargo test dump_the_renders -- --ignored`, then
+/// `PLUGIN_UI=/tmp/ui SNAPSHOT=/tmp/look.png SCENE=form cargo test look_tests
+/// -- --ignored` in the editor.
+#[test]
+#[ignore]
+fn dump_the_renders() {
+    use crate::database::Dialog;
+    use crate::ui::{admin, dialog, tree, Ui};
+    let Ok(dir) = std::env::var("UI_DUMP") else {
+        return;
+    };
+    std::fs::create_dir_all(&dir).unwrap();
+    let save = |name: &str, node: &ardoise_plugin::ui::Node| {
+        std::fs::write(
+            std::path::Path::new(&dir).join(name),
+            serde_json::to_string_pretty(node).unwrap(),
+        )
+        .unwrap();
+    };
+    let empty = app();
+    let (mut app, _path) = db_app(true);
+    let id = app.db.connections[0].id;
+    app.db.connections[0].name = "prod-postgres".into();
+    app.db.open.insert(id.to_string());
+    save("tree.json", &tree::view(&mut Ui::new(true), &app));
+    app.db.dialog = Some(Dialog::new());
+    save(
+        "form.json",
+        &dialog::view(&mut Ui::new(true), &app.db, app.db.dialog.as_ref().unwrap()),
+    );
+    let _ = app.update(Message::Db(DbMsg::OpenDialog(Some(id))));
+    save(
+        "form_edit.json",
+        &dialog::view(&mut Ui::new(true), &app.db, app.db.dialog.as_ref().unwrap()),
+    );
+    app.db.dialog = None;
+    let _ = app.update(Message::Db(DbMsg::AskDrop(
+        id,
+        "shop".into(),
+        "public".into(),
+        "items".into(),
+        crate::database::protocol::Kind::Table,
+    )));
+    save("confirm.json", &admin::small(&mut Ui::new(true), &app.db));
+    std::fs::write(
+        std::path::Path::new(&dir).join("titles.json"),
+        serde_json::to_string(&crate::ui::window_titles(&app)).unwrap(),
+    )
+    .unwrap();
+    save("tree_empty.json", &tree::view(&mut Ui::new(true), &empty));
+}
+
 fn orders_structure() -> crate::database::protocol::Structure {
     use crate::database::protocol::{
         ColumnDef, ConstraintDef, ConstraintKind, Reference, Structure,

@@ -2,7 +2,7 @@
 //! what is done in them turned into the messages of the Database tool, and
 //! what the tool asks of the editor carried out.
 
-mod admin;
+pub mod admin;
 mod console;
 pub mod dialog;
 mod table;
