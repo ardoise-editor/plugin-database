@@ -94,10 +94,6 @@ impl App {
                 self.db.health = None;
                 Task::none()
             }
-            DbMsg::HealthClose => {
-                self.db.health = None;
-                Task::none()
-            }
             DbMsg::ImportOpen(conn, database, schema, table) => {
                 let Some(params) = self.db_params(conn, false) else {
                     return self.db_ask_password(conn);

@@ -76,11 +76,12 @@ pub fn view(ui: &mut Ui, app: &App) -> Node {
                 ));
             }
             if c.running {
-                header.push(ui.tool(format!("■ {}", t!("db.cancel")), DbMsg::Cancel));
+                header.push(ui.icon_tool("square", t!("db.cancel").to_string(), DbMsg::Cancel));
             }
             header.push(
                 ui.button_if(t!("db.run").to_string(), ready.then_some(DbMsg::Run(false)))
-                    .button_style(ardoise_plugin::ui::ButtonStyle::Primary),
+                    .button_style(ardoise_plugin::ui::ButtonStyle::Primary)
+                    .icon("play"),
             );
             header.push(ui.tool(t!("db.format").to_string(), DbMsg::FormatSql));
             header.push(ui.button_if(
@@ -137,10 +138,10 @@ fn queries(ui: &mut Ui, app: &App) -> Node {
             b.button_style(ardoise_plugin::ui::ButtonStyle::Ghost)
         });
         if c.docs.len() > 1 {
-            tabs.push(ui.tool("×", DbMsg::CloseConsole(at)));
+            tabs.push(ui.icon_tool("x", t!("db.close").to_string(), DbMsg::CloseConsole(at)));
         }
     }
-    tabs.push(ui.tool("+", DbMsg::NewConsole));
+    tabs.push(ui.icon_tool("plus", t!("db.console_new").to_string(), DbMsg::NewConsole));
     let mut editor = ui
         .editor("sql", &c.editor.text(), "sql", DbMsg::SqlText)
         .with_completion()
@@ -249,7 +250,8 @@ fn log(ui: &mut Ui, app: &App) -> Node {
         }
         head.push(ui.tool(t!("db.log_reuse").to_string(), DbMsg::LogReuse(at)));
         let picked = c.selected_log == Some(at);
-        let copy_sql = ui.tool(
+        let copy_sql = ui.icon_tool(
+            "copy",
             t!("db.log_copy_sql").to_string(),
             DbMsg::CopyLog(at, LogCopy::Sql),
         );
@@ -259,12 +261,14 @@ fn log(ui: &mut Ui, app: &App) -> Node {
         } else {
             copy_sql
         });
-        head.push(ui.tool(
+        head.push(ui.icon_tool(
+            "copy",
             t!("db.log_copy_entry").to_string(),
             DbMsg::CopyLog(at, LogCopy::Entry),
         ));
         if !ok {
-            head.push(ui.tool(
+            head.push(ui.icon_tool(
+                "copy",
                 t!("db.log_copy_error").to_string(),
                 DbMsg::CopyLog(at, LogCopy::Error),
             ));

@@ -868,6 +868,23 @@ impl App {
                 }
                 Task::none()
             }
+            DbMsg::ReloadAll => {
+                let open: Vec<u64> = self
+                    .db
+                    .connections
+                    .iter()
+                    .map(|c| c.id)
+                    .filter(|id| self.db.open.contains(&id.to_string()))
+                    .collect();
+                Task::batch(
+                    open.into_iter()
+                        .map(|id| self.db_message(DbMsg::Reload(id))),
+                )
+            }
+            DbMsg::CollapseAll => {
+                self.db.open.clear();
+                Task::none()
+            }
             DbMsg::Reload(id) => {
                 self.db.open.insert(id.to_string());
                 self.db.structures.retain(|k, _| k.0 != id);
@@ -1119,7 +1136,6 @@ impl App {
             | DbMsg::HealthRun(_)
             | DbMsg::HealthRan(_)
             | DbMsg::HealthToConsole(_)
-            | DbMsg::HealthClose
             | DbMsg::ImportOpen(..)
             | DbMsg::ImportStructure(_)
             | DbMsg::ImportPick
@@ -1718,11 +1734,9 @@ impl App {
             | DbMsg::CopyCell(..)
             | DbMsg::CopySelection(..)
             | DbMsg::ShowLinks(_)
-            | DbMsg::CloseLinks
             | DbMsg::ShowDiagram(..)
             | DbMsg::DiagramLoaded(..)
             | DbMsg::CopyDiagram
-            | DbMsg::TextClose
             | DbMsg::OpenRelated(..)) => self.db_tree_message(msg),
             DbMsg::Altered(altered) => self.admin_altered(*altered),
             DbMsg::ClearLog => {

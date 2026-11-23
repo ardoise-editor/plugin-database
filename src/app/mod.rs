@@ -103,11 +103,20 @@ impl App {
                 {
                     return false;
                 }
-                db.text.take().is_some()
-                    | db.links.take().is_some()
-                    | db.new_schema.take().is_some()
-                    | db.confirm.take().is_some()
-                    | db.ssh_trust.take().is_some()
+                // One section shows at a time (see `ui::admin::small`): the
+                // one in front is closed, the next one shows.
+                if db.confirm.is_some() {
+                    db.confirm = None;
+                } else if db.ssh_trust.is_some() {
+                    db.ssh_trust = None;
+                } else if db.new_schema.is_some() {
+                    db.new_schema = None;
+                } else if db.links.is_some() {
+                    db.links = None;
+                } else {
+                    return db.text.take().is_some();
+                }
+                true
             }
             Window::Diagram => self.diagram.take().is_some(),
         }

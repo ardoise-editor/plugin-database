@@ -105,6 +105,10 @@ pub enum DbMsg {
     /// An item of the menu of a cell: the action, the row, the column shown.
     GridMenu(PathBuf, String, usize, usize),
     Reload(u64),
+    /// Reloads every source that is open.
+    ReloadAll,
+    /// Closes every node of the tree.
+    CollapseAll,
     TreeLoaded(u64, Done<Vec<Database>>),
     /// A table: connection, database, schema, table.
     OpenTable(u64, String, String, String),
@@ -225,13 +229,11 @@ pub enum DbMsg {
     ViewValue(PathBuf, usize, usize),
     CopyRow(PathBuf, usize),
     TextCopy,
-    TextClose,
     CopyCell(PathBuf, usize, usize),
     /// The block of selected cells, or the cell, in a format.
     CopySelection(PathBuf, grid::CopyFormat),
     /// The rows a row is linked to, in a window; closed.
     ShowLinks(Box<LinksView>),
-    CloseLinks,
     /// Opens a table with a condition on it (the rows another one points
     /// to, or the rows that point to this one).
     OpenRelated(u64, String, String, String, String),
@@ -253,7 +255,6 @@ pub enum DbMsg {
     HealthRun(String),
     HealthRan(Done<Ran>),
     HealthToConsole(String),
-    HealthClose,
     /// The import window: open it for a table, the columns were read, choose
     /// the file, the file was read, its options, where a field goes, go,
     /// done, close.
@@ -400,6 +401,10 @@ impl Import {
 pub enum HealthTab {
     Tables,
     Indexes,
+}
+
+impl HealthTab {
+    pub const ALL: [HealthTab; 2] = [HealthTab::Tables, HealthTab::Indexes];
 }
 
 #[derive(Debug, Clone)]

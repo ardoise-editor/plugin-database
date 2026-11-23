@@ -1427,6 +1427,243 @@ fn a_data_source_is_deleted_on_the_second_click() {
     assert!(app.db.dialog.is_none());
 }
 
+/// The nodes of a tree of JSON whose `type` is `kind`.
+fn nodes<'a>(value: &'a serde_json::Value, kind: &str, out: &mut Vec<&'a serde_json::Value>) {
+    if value["type"] == kind {
+        out.push(value);
+    }
+    match value {
+        serde_json::Value::Object(map) => map.values().for_each(|v| nodes(v, kind, out)),
+        serde_json::Value::Array(list) => list.iter().for_each(|v| nodes(v, kind, out)),
+        _ => {}
+    }
+}
+
+/// The pictos of the buttons of a render, as `(icon, tooltip)`.
+fn pictos(node: &ardoise_plugin::ui::Node) -> Vec<(String, String)> {
+    let json = serde_json::to_value(node).unwrap();
+    let mut buttons = Vec::new();
+    nodes(&json, "button", &mut buttons);
+    buttons
+        .iter()
+        .filter_map(|b| {
+            Some((
+                b["icon"].as_str()?.to_string(),
+                b["label"].as_str()?.to_string(),
+            ))
+        })
+        .collect()
+}
+
+#[test]
+fn the_header_of_the_panel_has_four_pictos_and_the_tree_folds_and_reloads() {
+    use crate::ui::{tree, Ui};
+    let (mut app, _path) = db_app(true);
+    let id = app.db.connections[0].id;
+    let mut ui = Ui::new(true);
+    let node = tree::view(&mut ui, &app);
+    let found = pictos(&node);
+    let header: Vec<&str> = found.iter().take(4).map(|(i, _)| i.as_str()).collect();
+    assert_eq!(
+        header,
+        ["plus", "terminal", "refresh-cw", "chevrons-up-down"]
+    );
+    // The tooltips are the labels they replaced (and the new one).
+    assert_eq!(found[0].1, t!("db.add"));
+    assert_eq!(found[1].1, t!("db.console"));
+    assert_eq!(found[2].1, t!("db.refresh"));
+    assert_eq!(found[3].1, t!("db.collapse_all"));
+    // The add button is the one of the accent.
+    let json = serde_json::to_value(&node).unwrap();
+    let mut buttons = Vec::new();
+    nodes(&json, "button", &mut buttons);
+    assert_eq!(buttons[0]["style"], "primary");
+    // Fold: every node closes.
+    app.db.open.insert(id.to_string());
+    app.db.open.insert(format!("{id}/shop"));
+    let _ = app.update(Message::Db(DbMsg::CollapseAll));
+    assert!(app.db.open.is_empty());
+    // Reload: only what is open.
+    let _ = app.update(Message::Db(DbMsg::ReloadAll));
+    assert!(app.db.open.is_empty(), "a closed source is left alone");
+    app.db.open.insert(id.to_string());
+    let _ = app.update(Message::Db(DbMsg::ReloadAll));
+    assert!(matches!(
+        app.db.trees.get(&id),
+        Some(crate::database::Tree::Loading)
+    ));
+}
+
+#[test]
+fn the_empty_panel_keeps_its_big_button_with_the_text() {
+    use crate::ui::{tree, Ui};
+    let app = app();
+    let mut ui = Ui::new(true);
+    let json = serde_json::to_value(tree::view(&mut ui, &app)).unwrap();
+    let mut buttons = Vec::new();
+    nodes(&json, "button", &mut buttons);
+    let big = buttons
+        .iter()
+        .find(|b| b["style"] == "primary" && b.get("icon").is_none())
+        .expect("the main button, with its text");
+    assert_eq!(big["label"], t!("db.add").to_string());
+}
+
+#[test]
+fn the_connection_form_has_tabs_tiles_and_a_footer_with_save_last() {
+    use crate::database::{Dialog, DialogTab};
+    use crate::ui::{dialog, Ui};
+    let mut app = app();
+    app.db.dialog = Some(Dialog::new());
+    let mut ui = Ui::new(true);
+    let node = dialog::view(&mut ui, &app.db, app.db.dialog.as_ref().unwrap());
+    let json = serde_json::to_value(&node).unwrap();
+    let children = json["children"].as_array().unwrap();
+    // The tabs first (all six), the footer last.
+    assert_eq!(children[0]["type"], "tabs");
+    assert_eq!(
+        children[0]["items"].as_array().unwrap().len(),
+        DialogTab::ALL.len()
+    );
+    assert_eq!(children.last().unwrap()["type"], "footer");
+    // Three tiles for the kind of data source.
+    let mut tiles = Vec::new();
+    nodes(&json, "tiles", &mut tiles);
+    assert_eq!(tiles[0]["items"].as_array().unwrap().len(), 3);
+    // The footer: the test as a picto at the left; Cancel then Save at the
+    // right; no Delete for a new source.
+    let footer = children.last().unwrap();
+    assert_eq!(footer["start"][0]["icon"], "zap");
+    assert_eq!(footer["start"][0]["label"], t!("db.test").to_string());
+    let end: Vec<&str> = footer["end"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["label"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        end,
+        [t!("db.cancel_dialog").as_ref(), t!("db.save").as_ref()]
+    );
+    assert_eq!(footer["end"][1]["style"], "primary");
+}
+
+#[test]
+fn the_form_of_a_source_that_exists_has_delete_in_red_and_duplicate_as_a_picto() {
+    use crate::ui::{dialog, Ui};
+    let (mut app, _path) = db_app(true);
+    let id = app.db.connections[0].id;
+    let _ = app.update(Message::Db(DbMsg::OpenDialog(Some(id))));
+    let mut ui = Ui::new(true);
+    let node = dialog::view(&mut ui, &app.db, app.db.dialog.as_ref().unwrap());
+    let json = serde_json::to_value(&node).unwrap();
+    let footer = json["children"].as_array().unwrap().last().unwrap().clone();
+    let icons: Vec<&str> = footer["start"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["icon"].as_str().unwrap())
+        .collect();
+    assert_eq!(icons, ["zap", "copy"]);
+    let delete = &footer["end"][1];
+    assert_eq!(delete["style"], "danger");
+    assert_eq!(delete["label"], t!("db.delete").to_string());
+}
+
+#[test]
+fn closing_the_text_window_answers_one_question_at_a_time() {
+    use crate::app::Window;
+    let (mut app, _path) = db_app(true);
+    let _ = app.update(Message::Db(DbMsg::AskEmpty(
+        app.db.connections[0].id,
+        "shop".into(),
+        "public".into(),
+        "items".into(),
+    )));
+    assert!(app.db.confirm.is_some());
+    app.db.new_schema = Some(crate::database::NewSchema {
+        conn: app.db.connections[0].id,
+        database: "shop".into(),
+        name: String::new(),
+        running: false,
+        error: None,
+    });
+    // The first (the question) closes; the next one shows.
+    assert!(app.close_window(Window::Text));
+    assert!(app.db.confirm.is_none() && app.db.new_schema.is_some());
+    assert!(app.close_window(Window::Text));
+    assert!(app.db.new_schema.is_none());
+    assert!(!app.close_window(Window::Text));
+}
+
+#[test]
+fn every_window_but_the_diagram_is_a_popin_with_a_title_of_its_own() {
+    let (mut app, _path) = db_app(true);
+    let id = app.db.connections[0].id;
+    let _ = app.update(Message::Db(DbMsg::OpenDialog(Some(id))));
+    let titles = crate::ui::window_titles(&app);
+    let dialog = titles
+        .iter()
+        .find(|(w, _, _)| *w == crate::ui::DIALOG)
+        .unwrap();
+    assert!(dialog.2, "wanted");
+    assert_eq!(dialog.1, t!("db.dialog_edit").to_string());
+}
+
+/// Writes what the plugin renders (the tree, the form of a new source and of
+/// one that exists, a question) as JSON, to look at it in the editor without
+/// a screen: `UI_DUMP=/tmp/ui cargo test dump_the_renders -- --ignored`, then
+/// `PLUGIN_UI=/tmp/ui SNAPSHOT=/tmp/look.png SCENE=form cargo test look_tests
+/// -- --ignored` in the editor.
+#[test]
+#[ignore]
+fn dump_the_renders() {
+    use crate::database::Dialog;
+    use crate::ui::{admin, dialog, tree, Ui};
+    let Ok(dir) = std::env::var("UI_DUMP") else {
+        return;
+    };
+    std::fs::create_dir_all(&dir).unwrap();
+    let save = |name: &str, node: &ardoise_plugin::ui::Node| {
+        std::fs::write(
+            std::path::Path::new(&dir).join(name),
+            serde_json::to_string_pretty(node).unwrap(),
+        )
+        .unwrap();
+    };
+    let empty = app();
+    let (mut app, _path) = db_app(true);
+    let id = app.db.connections[0].id;
+    app.db.connections[0].name = "prod-postgres".into();
+    app.db.open.insert(id.to_string());
+    save("tree.json", &tree::view(&mut Ui::new(true), &app));
+    app.db.dialog = Some(Dialog::new());
+    save(
+        "form.json",
+        &dialog::view(&mut Ui::new(true), &app.db, app.db.dialog.as_ref().unwrap()),
+    );
+    let _ = app.update(Message::Db(DbMsg::OpenDialog(Some(id))));
+    save(
+        "form_edit.json",
+        &dialog::view(&mut Ui::new(true), &app.db, app.db.dialog.as_ref().unwrap()),
+    );
+    app.db.dialog = None;
+    let _ = app.update(Message::Db(DbMsg::AskDrop(
+        id,
+        "shop".into(),
+        "public".into(),
+        "items".into(),
+        crate::database::protocol::Kind::Table,
+    )));
+    save("confirm.json", &admin::small(&mut Ui::new(true), &app.db));
+    std::fs::write(
+        std::path::Path::new(&dir).join("titles.json"),
+        serde_json::to_string(&crate::ui::window_titles(&app)).unwrap(),
+    )
+    .unwrap();
+    save("tree_empty.json", &tree::view(&mut Ui::new(true), &empty));
+}
+
 fn orders_structure() -> crate::database::protocol::Structure {
     use crate::database::protocol::{
         ColumnDef, ConstraintDef, ConstraintKind, Reference, Structure,
@@ -1497,7 +1734,7 @@ fn a_table_of_the_tree_opens_to_its_structure_and_shows_its_ddl() {
     assert!(text
         .text
         .contains("CONSTRAINT \"items_pkey\" PRIMARY KEY (id)"));
-    let _ = app.update(Message::Db(DbMsg::TextClose));
+    let _ = app.close_window(crate::app::Window::Text);
     assert!(app.db.text.is_none());
     // Folding it again.
     let _ = app.update(Message::Db(DbMsg::ToggleTable(
@@ -1527,7 +1764,7 @@ fn a_value_is_shown_whole_and_json_is_indented() {
             .clone()
             .unwrap()
     );
-    let _ = app.update(Message::Db(DbMsg::TextClose));
+    let _ = app.close_window(crate::app::Window::Text);
     let tab = app.db_tabs.get_mut(&path).unwrap();
     let page = tab.page.clone().unwrap();
     tab.pending
