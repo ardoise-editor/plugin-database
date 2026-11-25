@@ -438,9 +438,11 @@ impl App {
     /// the risk of them, if they have one.
     fn db_run_checked(&mut self, conn: u64, statements: Vec<String>) -> Task<Message> {
         let production = self.db.connection(conn).is_some_and(|c| c.production);
+        let confirm = self.db.connection(conn).is_some_and(|c| c.confirm_runs);
         let risk = statements
             .iter()
-            .find_map(|sql| database::protocol::risk_of(sql, production, self.db.console.dialect));
+            .find_map(|sql| database::protocol::risk_of(sql, production, self.db.console.dialect))
+            .or(confirm.then_some(database::protocol::Risk::Confirm));
         if let Some(risk) = risk {
             self.db.console.last = None;
             self.db.console.guard = Some(database::console::Guard {
@@ -726,6 +728,24 @@ impl App {
                 let Some(path) = path else {
                     return Task::none();
                 };
+                if field == Field::EnvFile {
+                    let read = std::fs::read_to_string(&path).map_err(|e| e.to_string());
+                    let said = match read {
+                        Ok(text) => {
+                            let filled = self
+                                .db
+                                .dialog
+                                .as_mut()
+                                .is_some_and(|form| form.apply_env(&text));
+                            (!filled).then(|| t!("db.env_none").to_string())
+                        }
+                        Err(error) => Some(error),
+                    };
+                    if let Some(said) = said {
+                        self.set_status(said, true);
+                    }
+                    return Task::none();
+                }
                 if let Some(form) = &mut self.db.dialog {
                     form.set(field, path.display().to_string());
                 }
@@ -1133,6 +1153,20 @@ impl App {
             msg @ (DbMsg::OpenHealth(..)
             | DbMsg::HealthLoaded(_)
             | DbMsg::HealthTab(_)
+            | DbMsg::HealthRefresh
+            | DbMsg::CompareOpen(..)
+            | DbMsg::ComparePick(_)
+            | DbMsg::CompareRun
+            | DbMsg::Compared(_)
+            | DbMsg::CompareClose
+            | DbMsg::SearchAllOpen(..)
+            | DbMsg::SearchAllText(_)
+            | DbMsg::SearchAllRun
+            | DbMsg::SearchAllDone(_)
+            | DbMsg::SearchAllShow(_)
+            | DbMsg::SearchAllClose
+            | DbMsg::SessionsLoaded(_)
+            | DbMsg::RolesLoaded(_)
             | DbMsg::HealthRun(_)
             | DbMsg::HealthRan(_)
             | DbMsg::HealthToConsole(_)
@@ -1599,7 +1633,10 @@ impl App {
                 let dialect = self.db.console.dialect;
                 let prefix = match (dialect, analyze) {
                     (database::protocol::Dialect::Postgres, true) => "EXPLAIN (ANALYZE, BUFFERS) ",
-                    (database::protocol::Dialect::Mysql, true) => "EXPLAIN ANALYZE ",
+                    (
+                        database::protocol::Dialect::Mysql | database::protocol::Dialect::Duckdb,
+                        true,
+                    ) => "EXPLAIN ANALYZE ",
                     // SQLite measures nothing: its plan is all there is.
                     (database::protocol::Dialect::Sqlite, _) => "EXPLAIN QUERY PLAN ",
                     (_, false) => "EXPLAIN ",
@@ -1727,10 +1764,13 @@ impl App {
             | DbMsg::ShowFunction(..)
             | DbMsg::Definition(..)
             | DbMsg::ShowDdl(..)
+            | DbMsg::SeedOpen(..)
+            | DbMsg::SeedRead(..)
             | DbMsg::TreeFilter(_)
             | DbMsg::ViewValue(..)
             | DbMsg::CopyRow(..)
             | DbMsg::TextCopy
+            | DbMsg::TextToConsole
             | DbMsg::CopyCell(..)
             | DbMsg::CopySelection(..)
             | DbMsg::ShowLinks(_)
@@ -1816,6 +1856,29 @@ impl App {
                     self.db.console.append_query(&sql);
                     self.db.console.tab = database::console::ConsoleTab::Queries;
                     self.db.console.save();
+                }
+                Task::none()
+            }
+            DbMsg::SavedName(name) => {
+                self.db.console.save_name = name;
+                Task::none()
+            }
+            DbMsg::SavedKeep => {
+                self.db.console.keep_query();
+                Task::none()
+            }
+            DbMsg::SavedUse(at) => {
+                if let Some(sql) = self.db.console.saved.get(at).map(|q| q.sql.clone()) {
+                    self.db.console.append_query(&sql);
+                    self.db.console.tab = database::console::ConsoleTab::Queries;
+                    self.db.console.save();
+                }
+                Task::none()
+            }
+            DbMsg::SavedDelete(at) => {
+                if at < self.db.console.saved.len() {
+                    self.db.console.saved.remove(at);
+                    self.db.console.save_saved();
                 }
                 Task::none()
             }
@@ -1919,10 +1982,27 @@ impl App {
                                 t!("db.console_failed", n = index + 1, error = error.as_str())
                                     .to_string(),
                             ),
-                            None => (
-                                true,
-                                t!("db.console_done", n = ran.results.len(), ms = ms).to_string(),
-                            ),
+                            None => {
+                                let affected: u64 = ran
+                                    .results
+                                    .iter()
+                                    .filter(|r| !r.has_rows)
+                                    .map(|r| r.affected)
+                                    .sum();
+                                let shown = ran.results.iter().filter(|r| r.has_rows).count();
+                                let mut said =
+                                    t!("db.console_done", n = ran.results.len(), ms = ms)
+                                        .to_string();
+                                if affected > 0 {
+                                    said.push(' ');
+                                    said.push_str(&t!("db.console_changed", n = affected));
+                                }
+                                if shown > 10 {
+                                    said.push(' ');
+                                    said.push_str(&t!("db.console_first_results", n = 10));
+                                }
+                                (true, said)
+                            }
                         });
                         // A SELECT shows its rows in a tab, like a table does;
                         // the rest says what it did in the log.

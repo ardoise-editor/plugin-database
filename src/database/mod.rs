@@ -5,18 +5,22 @@
 //! demand like the JDBC drivers of a JetBrains IDE: the app talks to it in
 //! JSON, one process per operation (see `protocol` for what is said).
 
+pub mod binary;
+pub mod compare;
 pub mod completion;
 pub mod console;
 pub mod convert;
 pub mod ddl;
 pub mod designer;
 pub mod diagram;
+pub mod env;
 pub mod grid;
 pub mod import;
 // The driver uses parts of it that the app does not.
 #[allow(dead_code)]
 pub mod protocol;
 pub mod secrets;
+pub mod seed;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -223,6 +227,9 @@ pub enum DbMsg {
     StructureRead(TableKey, bool, Done<protocol::Structure>),
     /// The DDL of a table is shown.
     ShowDdl(u64, String, String, String),
+    /// Rows of made-up data for a table: asked, and its structure read.
+    SeedOpen(u64, String, String, String),
+    SeedRead(TableKey, Done<protocol::Structure>),
     /// What is typed in the filter of the tree.
     TreeFilter(String),
     /// A value is shown whole, a row or a value is copied.
@@ -247,11 +254,37 @@ pub enum DbMsg {
     SwitchConsole(usize),
     CloseConsole(usize),
     LogFilter(String),
+    /// The queries kept: the name typed, keep the one written, put one in
+    /// the editor, forget one.
+    SavedName(String),
+    SavedKeep,
+    SavedUse(usize),
+    SavedDelete(usize),
     /// The health window of a database: open, read, tab, clean a table,
     /// the answer, send a statement to the console, close.
     OpenHealth(u64, String),
     HealthLoaded(Done<protocol::Health>),
     HealthTab(HealthTab),
+    HealthRefresh,
+    /// Compare a schema with another: open, pick, run, the SQL that came,
+    /// give up.
+    CompareOpen(u64, String, String),
+    ComparePick(usize),
+    CompareRun,
+    Compared(Result<String, String>),
+    CompareClose,
+    /// Looking for a text in every table: open, the text, run, what was
+    /// found, open a table with its rows, give up.
+    SearchAllOpen(u64, String, String),
+    SearchAllText(String),
+    SearchAllRun,
+    SearchAllDone(Result<Vec<Hit>, String>),
+    SearchAllShow(usize),
+    SearchAllClose,
+    /// The SQL on show goes to the console, to be changed and run.
+    TextToConsole,
+    SessionsLoaded(Done<Vec<protocol::SessionInfo>>),
+    RolesLoaded(Done<Vec<protocol::RoleInfo>>),
     HealthRun(String),
     HealthRan(Done<Ran>),
     HealthToConsole(String),
@@ -401,15 +434,38 @@ impl Import {
 pub enum HealthTab {
     Tables,
     Indexes,
+    Sessions,
+    Roles,
 }
 
 impl HealthTab {
-    pub const ALL: [HealthTab; 2] = [HealthTab::Tables, HealthTab::Indexes];
+    /// The tabs of a kind of data source: SQLite has no other session.
+    pub fn of(dialect: protocol::Dialect) -> &'static [HealthTab] {
+        if matches!(
+            dialect,
+            protocol::Dialect::Sqlite | protocol::Dialect::Duckdb
+        ) {
+            &[HealthTab::Tables, HealthTab::Indexes]
+        } else {
+            &[
+                HealthTab::Tables,
+                HealthTab::Indexes,
+                HealthTab::Sessions,
+                HealthTab::Roles,
+            ]
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct HealthView {
     pub conn: u64,
+    pub dialect: protocol::Dialect,
+    /// The sessions of the server, read when their tab is shown.
+    pub sessions: Option<Vec<protocol::SessionInfo>>,
+    pub sessions_loading: bool,
+    /// The roles of the server, read when their tab is shown.
+    pub roles: Option<Vec<protocol::RoleInfo>>,
     pub database: String,
     pub data: Option<protocol::Health>,
     pub loading: bool,
@@ -434,6 +490,107 @@ pub struct LinksView {
 pub struct TextView {
     pub title: String,
     pub text: String,
+    /// The text is SQL (a definition): it can be taken to the console to be
+    /// changed and run.
+    pub sql: bool,
+    /// A picture of the value, when it is an image (the SVG that holds it).
+    pub image: Option<String>,
+}
+
+/// A table where the text of a search in the whole database was found.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Hit {
+    pub schema: String,
+    pub table: String,
+    pub count: u64,
+    /// The condition that keeps the rows found.
+    pub filter: String,
+}
+
+/// A search for a text in every table of a database or a schema.
+#[derive(Debug, Clone)]
+pub struct SearchAll {
+    pub conn: u64,
+    pub database: String,
+    /// Only this schema (the whole database when empty).
+    pub schema: String,
+    pub text: String,
+    pub running: bool,
+    pub hits: Option<Vec<Hit>>,
+    pub error: Option<String>,
+}
+
+/// The most tables a search looks in.
+pub const SEARCH_TABLES: usize = 300;
+
+/// Looks for a text in every column of the tables: how many rows of each
+/// table have it. A table that cannot be read the way a text is (a column of
+/// a type the server will not compare) is passed over.
+pub async fn search_all(
+    params: Params,
+    database: String,
+    schema: String,
+    text: String,
+) -> Result<Vec<Hit>, String> {
+    let dialect = params.target.dialect;
+    let catalog = table_columns(params.clone(), database.clone())
+        .await
+        .result?;
+    let mut tables: Vec<(String, String, String)> = Vec::new();
+    let mut at = 0;
+    while at < catalog.columns.len() && tables.len() < SEARCH_TABLES {
+        let first = &catalog.columns[at];
+        let names: Vec<&str> = catalog.columns[at..]
+            .iter()
+            .take_while(|c| c.schema == first.schema && c.table == first.table)
+            .map(|c| c.name.as_str())
+            .collect();
+        at += names.len();
+        if !schema.is_empty() && first.schema != schema {
+            continue;
+        }
+        if let Some(condition) = protocol::search_condition(dialect, &names, &text) {
+            tables.push((first.schema.clone(), first.table.clone(), condition));
+        }
+    }
+    let mut hits = Vec::new();
+    for (schema, table, condition) in tables {
+        let at = TableRef {
+            database: database.clone(),
+            schema: schema.clone(),
+            table: table.clone(),
+        };
+        let query = Query {
+            filter: condition.clone(),
+            ..Query::default()
+        };
+        // A table that cannot be read the way a text is (a column of a type
+        // the server will not compare) is passed over.
+        if let Ok(count) = count(None, params.clone(), at, query).await.result {
+            if count > 0 {
+                hits.push(Hit {
+                    schema,
+                    table,
+                    count,
+                    filter: condition,
+                });
+            }
+        }
+    }
+    Ok(hits)
+}
+
+/// The question of which schema to compare one with.
+#[derive(Debug, Clone)]
+pub struct Compare {
+    pub conn: u64,
+    pub database: String,
+    pub schema: String,
+    /// What it can be compared with: connection, database, schema.
+    pub choices: Vec<(u64, String, String)>,
+    pub picked: Option<usize>,
+    pub running: bool,
+    pub error: Option<String>,
 }
 
 /// The question to make a schema.
@@ -615,6 +772,9 @@ impl DialogTab {
 pub enum Field {
     Name,
     Comment,
+    Group,
+    /// A `.env` file whose data source fills the form.
+    EnvFile,
     Host,
     Port,
     Database,
@@ -648,6 +808,7 @@ pub enum CopyField {
 pub enum Flag {
     ReadOnly,
     Production,
+    ConfirmRuns,
     SingleDatabase,
     SystemSchemas,
     TemplateDatabases,
@@ -663,6 +824,46 @@ pub enum Choice {
     SslMode(SslMode),
     SshAuth(SshAuth),
     Dialect(protocol::Dialect),
+    Tint(Tint),
+}
+
+/// The colour of a data source: a dot before its name.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Tint {
+    #[default]
+    None,
+    Red,
+    Orange,
+    Yellow,
+    Green,
+    Blue,
+    Purple,
+}
+
+impl Tint {
+    pub const ALL: [Tint; 7] = [
+        Tint::None,
+        Tint::Red,
+        Tint::Orange,
+        Tint::Yellow,
+        Tint::Green,
+        Tint::Blue,
+        Tint::Purple,
+    ];
+
+    /// The dot, or nothing.
+    pub fn dot(self) -> &'static str {
+        match self {
+            Tint::None => "",
+            Tint::Red => "🔴",
+            Tint::Orange => "🟠",
+            Tint::Yellow => "🟡",
+            Tint::Green => "🟢",
+            Tint::Blue => "🔵",
+            Tint::Purple => "🟣",
+        }
+    }
 }
 
 /// What is done with the password once it is typed, as in the
@@ -710,6 +911,13 @@ pub struct Connection {
     pub read_only: bool,
     /// A source where every change is asked about before it runs.
     pub production: bool,
+    /// Every statement of the console is shown in a window and waits for a
+    /// yes before it runs.
+    pub confirm_runs: bool,
+    /// A colour that tells it from the others at a glance.
+    pub color: Tint,
+    /// The folder of the tree it is in (none when empty).
+    pub group: String,
     pub startup_script: String,
     pub time_zone: String,
     pub props: Vec<(String, String)>,
@@ -739,6 +947,9 @@ impl Default for Connection {
             ssh_secret: String::new(),
             read_only: false,
             production: false,
+            confirm_runs: false,
+            color: Tint::None,
+            group: String::new(),
             startup_script: String::new(),
             time_zone: String::new(),
             props: Vec::new(),
@@ -751,12 +962,17 @@ impl Default for Connection {
 impl Connection {
     /// What the sidebar calls it: the name, or where it points to.
     pub fn label(&self) -> String {
-        if !self.name.trim().is_empty() {
+        let name = if !self.name.trim().is_empty() {
             self.name.trim().to_string()
         } else if !self.database.is_empty() {
             format!("{}@{}", self.database, self.host)
         } else {
             self.host.clone()
+        };
+        if self.color == Tint::None {
+            name
+        } else {
+            format!("{} {name}", self.color.dot())
         }
     }
 
@@ -907,6 +1123,7 @@ fn driver_candidates(picked: &str, dialect: protocol::Dialect) -> Vec<PathBuf> {
         protocol::Dialect::Postgres => "ARDOISE_DB_DRIVER",
         protocol::Dialect::Sqlite => "ARDOISE_DB_DRIVER_SQLITE",
         protocol::Dialect::Mysql => "ARDOISE_DB_DRIVER_MYSQL",
+        protocol::Dialect::Duckdb => "ARDOISE_DB_DRIVER_DUCKDB",
     };
     if let Some(path) = std::env::var_os(variable) {
         found.push(PathBuf::from(path));
@@ -1024,12 +1241,32 @@ async fn call(picked: String, request: protocol::Request) -> Done<serde_json::Va
     call_with(None, picked, request).await
 }
 
+/// The one session of a DuckDB file. DuckDB lets a single process open a
+/// file: the tree, the tables, the console and what is asked once all go
+/// through this session, one request after the other.
+fn duckdb_session(path: &str) -> Live {
+    static SESSIONS: std::sync::OnceLock<std::sync::Mutex<HashMap<String, Live>>> =
+        std::sync::OnceLock::new();
+    SESSIONS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entry(path.trim().to_string())
+        .or_default()
+        .clone()
+}
+
 /// The same, in the session that stays when there is one (see `Live`).
 async fn call_with(
     live: Option<Live>,
     picked: String,
     request: protocol::Request,
 ) -> Done<serde_json::Value> {
+    let live = if request.target.dialect == protocol::Dialect::Duckdb {
+        Some(duckdb_session(&request.target.database))
+    } else {
+        live
+    };
     let result = match live {
         Some(live) => call_live(live, picked, request).await,
         None => call_inner(picked, request).await,
@@ -1614,6 +1851,24 @@ pub async fn health(params: Params, database: String) -> Done<protocol::Health> 
     call_with(params.browse.clone(), params.driver.clone(), request)
         .await
         .map(|answer| serde_json::from_value(answer["health"].clone()).map_err(|e| e.to_string()))
+}
+
+/// The roles of the server and what they may do.
+pub async fn roles(params: Params, database: String) -> Done<Vec<protocol::RoleInfo>> {
+    let mut request = params.request("roles");
+    request.database = database;
+    call_with(params.browse.clone(), params.driver.clone(), request)
+        .await
+        .map(|answer| serde_json::from_value(answer["roles"].clone()).map_err(|e| e.to_string()))
+}
+
+/// The sessions of the server and what they run.
+pub async fn sessions(params: Params, database: String) -> Done<Vec<protocol::SessionInfo>> {
+    let mut request = params.request("sessions");
+    request.database = database;
+    call_with(params.browse.clone(), params.driver.clone(), request)
+        .await
+        .map(|answer| serde_json::from_value(answer["sessions"].clone()).map_err(|e| e.to_string()))
 }
 
 /// The columns of a table that take their values from a list.
@@ -2259,6 +2514,30 @@ impl Dialog {
         }
     }
 
+    /// What a `.env` file names goes into the form. Whether it named one.
+    pub fn apply_env(&mut self, text: &str) -> bool {
+        let Some(found) = env::from_env(text) else {
+            return false;
+        };
+        self.choose(Choice::Dialect(found.dialect));
+        let d = &mut self.draft;
+        if matches!(
+            found.dialect,
+            protocol::Dialect::Sqlite | protocol::Dialect::Duckdb
+        ) {
+            d.database = found.database;
+        } else {
+            d.host = found.host;
+            d.port = found.port;
+            self.port = found.port.to_string();
+            d.database = found.database;
+            d.user = found.user;
+            self.password = found.password;
+        }
+        self.test = TestState::Idle;
+        true
+    }
+
     /// Sets what a line of text holds.
     pub fn set(&mut self, field: Field, value: String) {
         // A URL fills the form, wherever it was typed.
@@ -2280,6 +2559,7 @@ impl Dialog {
         match field {
             Field::Name => d.name = value,
             Field::Comment => d.comment = value,
+            Field::Group => d.group = value.trim().to_string(),
             Field::Host => d.host = value,
             Field::Port => {
                 if let Some(port) = value.trim().parse::<u16>().ok().filter(|p| *p > 0) {
@@ -2319,6 +2599,7 @@ impl Dialog {
             Field::SchemaPattern => d.scope.pattern = value,
             Field::ObjectFilter => d.scope.object_filter = value,
             Field::DriverFile => self.driver_file = value,
+            Field::EnvFile => {}
         }
         self.test = TestState::Idle;
     }
@@ -2328,6 +2609,7 @@ impl Dialog {
         match flag {
             Flag::ReadOnly => d.read_only = on,
             Flag::Production => d.production = on,
+            Flag::ConfirmRuns => d.confirm_runs = on,
             Flag::SingleDatabase => d.scope.single_database = on,
             Flag::SystemSchemas => d.scope.system_schemas = on,
             Flag::TemplateDatabases => d.scope.template_databases = on,
@@ -2348,6 +2630,7 @@ impl Dialog {
             }
             Choice::Auth(auth) => d.auth = auth,
             Choice::Remember(remember) => d.remember = remember,
+            Choice::Tint(tint) => d.color = tint,
             Choice::SslMode(mode) => d.ssl.mode = mode,
             Choice::SshAuth(auth) => d.ssh.auth = auth,
             Choice::Dialect(dialect) => {
@@ -2364,7 +2647,10 @@ impl Dialog {
                         port.to_string()
                     };
                 }
-                if dialect == protocol::Dialect::Sqlite {
+                if matches!(
+                    dialect,
+                    protocol::Dialect::Sqlite | protocol::Dialect::Duckdb
+                ) {
                     d.url_only = false;
                     d.ssh.enabled = false;
                 }
@@ -2383,7 +2669,10 @@ impl Dialog {
     /// What it takes to connect.
     pub fn valid(&self) -> bool {
         let d = &self.draft;
-        if d.dialect == protocol::Dialect::Sqlite {
+        if matches!(
+            d.dialect,
+            protocol::Dialect::Sqlite | protocol::Dialect::Duckdb
+        ) {
             // A file is all it takes.
             return !d.database.trim().is_empty();
         }
@@ -2480,6 +2769,8 @@ pub struct State {
     pub text: Option<TextView>,
     pub links: Option<LinksView>,
     pub new_schema: Option<NewSchema>,
+    pub compare: Option<Compare>,
+    pub search_all: Option<SearchAll>,
     /// The sessions that stay, one per data source the console ran on.
     pub live: HashMap<u64, Live>,
     /// The sessions the tables are read through, one per data source.
@@ -2547,6 +2838,8 @@ impl State {
             text: None,
             links: None,
             new_schema: None,
+            compare: None,
+            search_all: None,
             live: HashMap::new(),
             browse: Default::default(),
         }
@@ -4421,9 +4714,119 @@ mod other_systems_tests {
 
     /// The SQLite driver, built by Cargo next to the test program.
     fn sqlite_driver() -> Option<PathBuf> {
+        // Next to the test program, or higher: Cargo may keep the test
+        // programs in a folder of their own under `target/debug`.
         let exe = std::env::current_exe().ok()?;
-        let built = exe.parent()?.parent()?.join("ardoise-db-sqlite");
-        built.is_file().then_some(built)
+        exe.ancestors()
+            .skip(1)
+            .map(|dir| dir.join("ardoise-db-sqlite"))
+            .find(|built| built.is_file())
+    }
+
+    #[test]
+    fn a_duckdb_file_is_read_changed_and_searched_through_the_apps_own_calls() {
+        let exe = std::env::current_exe().unwrap();
+        let Some(driver) = exe
+            .ancestors()
+            .skip(1)
+            .map(|dir| dir.join("ardoise-db-duckdb"))
+            .find(|built| built.is_file())
+        else {
+            eprintln!("the DuckDB driver is not built: skipped");
+            return;
+        };
+        std::env::set_var("ARDOISE_DB_DRIVER_DUCKDB", &driver);
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("shop.duckdb");
+        duckdb::Connection::open(&file)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE pets (id INTEGER PRIMARY KEY, name VARCHAR);
+                 INSERT INTO pets VALUES (1, 'Rex'), (2, 'Tom');",
+            )
+            .unwrap();
+        let connection = Connection {
+            dialect: protocol::Dialect::Duckdb,
+            database: file.to_string_lossy().into_owned(),
+            ..Connection::default()
+        };
+        let params = Params {
+            target: connection.target(String::new(), String::new()),
+            scope: connection.scope.clone(),
+            driver: String::new(),
+            browse: Some(Live::default()),
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            assert_eq!(
+                probe_driver_of(protocol::Dialect::Duckdb, String::new()).await,
+                Driver::Ready,
+                "the driver answers the protocol of the app"
+            );
+            let version = test(params.clone()).await.result.unwrap();
+            assert!(version.starts_with("DuckDB"), "{version}");
+            let databases = tree(params.clone()).await.result.unwrap();
+            assert_eq!(databases[0].schemas[0].tables[0].name, "pets");
+            let table = TableRef {
+                database: String::new(),
+                schema: "main".into(),
+                table: "pets".into(),
+            };
+            let done = apply(
+                None,
+                params.clone(),
+                table.clone(),
+                vec![protocol::Change {
+                    kind: protocol::ChangeKind::Update,
+                    key: vec![("id".into(), "2".into())],
+                    set: vec![("name".into(), Some("Tommy".into()))],
+                    original: Vec::new(),
+                }],
+            )
+            .await;
+            assert_eq!(done.result.unwrap(), 1);
+            let page = rows(
+                params.clone(),
+                table.clone(),
+                Query {
+                    limit: 10,
+                    filter: "name = 'Tommy'".into(),
+                    ..Query::default()
+                },
+            )
+            .await
+            .result
+            .unwrap();
+            assert_eq!(page.rows.len(), 1);
+            // The console has a session of its own, and what is run once has
+            // none: on the same file, they must not lock each other out.
+            let ran = run_with(
+                Some(Live::default()),
+                params.clone(),
+                String::new(),
+                vec!["INSERT INTO pets VALUES (3, 'Ida')".into()],
+                false,
+            )
+            .await
+            .result
+            .unwrap();
+            assert!(ran.failed.is_none(), "{:?}", ran.failed);
+            let once = run_statements(params.clone(), vec!["DELETE FROM pets WHERE id = 3".into()])
+                .await
+                .result
+                .unwrap();
+            assert!(once.failed.is_none(), "{:?}", once.failed);
+            assert!(test(params.clone()).await.result.is_ok());
+            // What was changed is found by the search in every table.
+            let found = search_all(params.clone(), String::new(), String::new(), "tommy".into())
+                .await
+                .unwrap();
+            assert_eq!(found.len(), 1);
+            assert_eq!((found[0].table.as_str(), found[0].count), ("pets", 1));
+        });
     }
 
     #[test]
@@ -4497,6 +4900,26 @@ mod other_systems_tests {
             )
             .await;
             assert_eq!(done.result.unwrap(), 1);
+            // A text is looked for in every table: how many rows have it.
+            let found = search_all(
+                params.clone(),
+                String::new(),
+                String::new(),
+                "o'neil".into(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(found.len(), 1);
+            assert_eq!((found[0].table.as_str(), found[0].count), ("pets", 1));
+            assert!(
+                search_all(params.clone(), String::new(), String::new(), "zzz".into())
+                    .await
+                    .unwrap()
+                    .is_empty()
+            );
+            // The health of the file, read through the same calls.
+            let state = health(params.clone(), String::new()).await.result.unwrap();
+            assert!(state.tables.iter().any(|t| t.name == "pets" && t.rows == 2));
             // The conversions of the app work on what any driver exports.
             let out = dir.path().join("pets.sql").to_string_lossy().into_owned();
             let exported = export_converted(

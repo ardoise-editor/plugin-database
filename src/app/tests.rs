@@ -639,6 +639,213 @@ fn on_a_production_source_a_change_with_a_where_waits_too() {
 }
 
 #[test]
+fn a_source_that_confirms_shows_every_query_in_a_window_before_it_runs() {
+    let (mut app, _) = db_app(true);
+    let _ = app.update(Message::Db(DbMsg::ToggleConsole));
+    let id = app.db.connections[0].id;
+    app.db.connections[0].confirm_runs = true;
+    app.db.console.connection = Some(id);
+    app.db.console.editor = crate::text_editor::Content::with_text("SELECT 1");
+    let _ = app.update(Message::Db(DbMsg::Run(false)));
+    assert!(!app.db.console.running);
+    let guard = app.db.console.guard.clone().expect("the query waits");
+    assert_eq!(guard.risk, crate::database::protocol::Risk::Confirm);
+    assert_eq!(guard.statements, vec!["SELECT 1".to_string()]);
+    assert!(crate::ui::window_titles(&app)
+        .iter()
+        .any(|(id, _, wanted)| *id == crate::ui::TEXT && *wanted));
+    let _ = app.update(Message::Db(DbMsg::GuardRun));
+    assert!(app.db.console.running && app.db.console.guard.is_none());
+}
+
+#[test]
+fn a_query_is_kept_under_a_name_put_back_and_forgotten() {
+    let (mut app, _) = db_app(true);
+    let _ = app.update(Message::Db(DbMsg::ToggleConsole));
+    app.db.console.saved.clear();
+    app.db.console.editor = crate::text_editor::Content::with_text("SELECT 1");
+    let _ = app.update(Message::Db(DbMsg::SavedName("one".into())));
+    let _ = app.update(Message::Db(DbMsg::SavedKeep));
+    assert_eq!(app.db.console.saved.len(), 1);
+    assert_eq!(app.db.console.saved[0].name, "one");
+    assert!(app.db.console.save_name.is_empty());
+    // The same name is the same query, changed.
+    app.db.console.editor = crate::text_editor::Content::with_text("SELECT 2");
+    let _ = app.update(Message::Db(DbMsg::SavedName("one".into())));
+    let _ = app.update(Message::Db(DbMsg::SavedKeep));
+    assert_eq!(app.db.console.saved.len(), 1);
+    assert!(app.db.console.saved[0].sql.contains("SELECT 2"));
+    // What is kept is on disk for the next time.
+    assert_eq!(crate::database::console::load_saved(), app.db.console.saved);
+    // Without a name, its first words name it.
+    app.db.console.editor = crate::text_editor::Content::with_text("SELECT * FROM t");
+    let _ = app.update(Message::Db(DbMsg::SavedKeep));
+    assert_eq!(app.db.console.saved[1].name, "SELECT * FROM t");
+    // Put back, it is written in the console.
+    app.db.console.editor = crate::text_editor::Content::new();
+    let _ = app.update(Message::Db(DbMsg::SavedUse(0)));
+    assert!(app.db.console.editor.text().contains("SELECT 2"));
+    let _ = app.update(Message::Db(DbMsg::SavedDelete(0)));
+    assert_eq!(app.db.console.saved.len(), 1);
+}
+
+#[test]
+fn the_health_window_reads_the_sessions_when_their_tab_is_shown() {
+    use crate::database::HealthTab;
+    let (mut app, _) = db_app(true);
+    let id = app.db.connections[0].id;
+    let _ = app.update(Message::Db(DbMsg::OpenHealth(id, String::new())));
+    assert!(app.db.health.as_ref().unwrap().sessions.is_none());
+    let _ = app.update(Message::Db(DbMsg::HealthTab(HealthTab::Sessions)));
+    assert_eq!(app.db.health.as_ref().unwrap().tab, HealthTab::Sessions);
+    // SQLite has no other session: its window has no such tab.
+    assert_eq!(
+        HealthTab::of(crate::database::protocol::Dialect::Sqlite),
+        &[HealthTab::Tables, HealthTab::Indexes]
+    );
+    assert!(
+        crate::ui::admin::new_role_statement(crate::database::protocol::Dialect::Postgres)
+            .starts_with("CREATE ROLE")
+    );
+    assert_eq!(
+        crate::ui::admin::drop_role_statement(crate::database::protocol::Dialect::Postgres, "a b"),
+        "DROP ROLE \"a b\";"
+    );
+    let _ = app.update(Message::Db(DbMsg::HealthTab(HealthTab::Roles)));
+    assert_eq!(app.db.health.as_ref().unwrap().tab, HealthTab::Roles);
+    assert_eq!(
+        crate::ui::admin::stop_statement(crate::database::protocol::Dialect::Mysql, 7, false),
+        "KILL QUERY 7"
+    );
+    assert_eq!(
+        crate::ui::admin::stop_statement(crate::database::protocol::Dialect::Postgres, 7, true),
+        "SELECT pg_terminate_backend(7)"
+    );
+}
+
+#[test]
+fn a_definition_is_taken_to_the_console_to_be_changed() {
+    let (mut app, _) = db_app(true);
+    app.db.console.editor = crate::text_editor::Content::new();
+    app.db.text = Some(crate::database::TextView {
+        title: "public.v".into(),
+        text: "CREATE OR REPLACE VIEW v AS SELECT 1;".into(),
+        sql: true,
+        image: None,
+    });
+    let _ = app.update(Message::Db(DbMsg::TextToConsole));
+    assert!(app.db.text.is_none());
+    assert!(app.db.console.open);
+    assert!(app
+        .db
+        .console
+        .editor
+        .text()
+        .contains("CREATE OR REPLACE VIEW v"));
+    // A value that is not SQL stays where it is.
+    app.db.text = Some(crate::database::TextView {
+        title: "note".into(),
+        text: "hello".into(),
+        sql: false,
+        image: None,
+    });
+    let _ = app.update(Message::Db(DbMsg::TextToConsole));
+    assert!(app.db.text.is_some());
+}
+
+#[test]
+fn a_schema_is_compared_with_another_one_of_the_tree() {
+    use crate::database::protocol::{Database, Schema};
+    use crate::database::Tree;
+    let (mut app, _) = db_app(true);
+    let id = app.db.connections[0].id;
+    let schema = |name: &str| Schema {
+        name: name.into(),
+        tables: Vec::new(),
+        routines: Vec::new(),
+        sequences: Vec::new(),
+        types: Vec::new(),
+    };
+    app.db.trees.insert(
+        id,
+        Tree::Loaded(vec![Database {
+            name: "shop".into(),
+            current: true,
+            schemas: vec![schema("public"), schema("sales")],
+        }]),
+    );
+    let _ = app.update(Message::Db(DbMsg::CompareOpen(
+        id,
+        "shop".into(),
+        "public".into(),
+    )));
+    let compare = app.db.compare.as_ref().expect("the question is asked");
+    // The schema itself is not offered to be compared with itself.
+    assert_eq!(
+        compare.choices,
+        vec![(id, "shop".to_string(), "sales".to_string())]
+    );
+    assert_eq!(compare.picked, Some(0));
+    assert!(crate::ui::window_titles(&app)
+        .iter()
+        .any(|(w, _, wanted)| *w == crate::ui::TEXT && *wanted));
+    // Two schemas alike: it is said, nothing else shows.
+    let _ = app.update(Message::Db(DbMsg::Compared(Ok(String::new()))));
+    assert!(app.db.compare.as_ref().unwrap().error.is_some());
+    let _ = app.update(Message::Db(DbMsg::Compared(Ok(
+        "ALTER TABLE t ADD COLUMN a int;".into(),
+    ))));
+    assert!(app.db.compare.is_none());
+    assert!(app.db.text.as_ref().unwrap().sql);
+}
+
+#[test]
+fn a_data_source_has_a_colour_and_a_group_that_are_kept() {
+    use crate::database::{Choice, Field, Tint};
+    let (mut app, _) = db_app(true);
+    let id = app.db.connections[0].id;
+    let _ = app.update(Message::Db(DbMsg::OpenDialog(Some(id))));
+    let _ = app.update(Message::Db(DbMsg::Choose(Choice::Tint(Tint::Red))));
+    let _ = app.update(Message::Db(DbMsg::Text(Field::Group, " Clients ".into())));
+    let draft = &app.db.dialog.as_ref().unwrap().draft;
+    assert_eq!((draft.color, draft.group.as_str()), (Tint::Red, "Clients"));
+    // The colour shows before the name, and both are written to the file.
+    assert!(draft.label().starts_with("🔴 "));
+    let text = serde_json::to_string(draft).unwrap();
+    let back: crate::database::Connection = serde_json::from_str(&text).unwrap();
+    assert_eq!((back.color, back.group.as_str()), (Tint::Red, "Clients"));
+    // A file written before has neither.
+    let old: crate::database::Connection = serde_json::from_str(r#"{"id": 1}"#).unwrap();
+    assert_eq!((old.color, old.group.as_str()), (Tint::None, ""));
+}
+
+#[test]
+fn a_env_file_fills_the_form_of_a_data_source() {
+    let (mut app, _) = db_app(true);
+    let _ = app.update(Message::Db(DbMsg::OpenDialog(None)));
+    let form = app.db.dialog.as_mut().unwrap();
+    assert!(!form.apply_env("APP_ENV=local"));
+    assert!(form.apply_env("DATABASE_URL=mysql://root:pw@db.local:3307/shop"));
+    assert_eq!(
+        form.draft.dialect,
+        crate::database::protocol::Dialect::Mysql
+    );
+    assert_eq!(
+        (
+            form.draft.host.as_str(),
+            form.draft.port,
+            form.draft.database.as_str()
+        ),
+        ("db.local", 3307, "shop")
+    );
+    assert_eq!(
+        (form.draft.user.as_str(), form.password.as_str()),
+        ("root", "pw")
+    );
+    assert_eq!(form.port, "3307");
+}
+
+#[test]
 fn an_sql_file_runs_on_the_data_source_of_the_console() {
     let (mut app, _) = db_app(true);
     let file = |language: &str| {
@@ -1526,10 +1733,10 @@ fn the_connection_form_has_tabs_tiles_and_a_footer_with_save_last() {
         DialogTab::ALL.len()
     );
     assert_eq!(children.last().unwrap()["type"], "footer");
-    // Three tiles for the kind of data source.
+    // A tile for each kind of data source.
     let mut tiles = Vec::new();
     nodes(&json, "tiles", &mut tiles);
-    assert_eq!(tiles[0]["items"].as_array().unwrap().len(), 3);
+    assert_eq!(tiles[0]["items"].as_array().unwrap().len(), 4);
     // The footer: the test as a picto at the left; Cancel then Save at the
     // right; no Delete for a new source.
     let footer = children.last().unwrap();
@@ -1854,6 +2061,31 @@ fn a_value_is_shown_whole_and_json_is_indented() {
     let _ = page;
     let _ = app.update(Message::Db(DbMsg::ViewValue(path, 0, 1)));
     assert_eq!(app.db.text.as_ref().unwrap().text, "{\n  \"a\": 1\n}");
+}
+
+#[test]
+fn bytes_are_shown_as_a_dump_and_an_image_as_a_picture() {
+    let (mut app, path) = db_app(true);
+    let tab = app.db_tabs.get_mut(&path).unwrap();
+    tab.pending
+        .edits
+        .insert((0, 1), Some("\\x89504e470d0a1a0a00".to_string()));
+    let _ = app.update(Message::Db(DbMsg::ViewValue(path.clone(), 0, 1)));
+    let view = app.db.text.as_ref().unwrap();
+    assert!(view.title.starts_with("label (9 B, PNG)"), "{}", view.title);
+    assert!(view.text.starts_with("00000000  89 50 4e 47"));
+    assert!(view
+        .image
+        .as_ref()
+        .unwrap()
+        .contains("data:image/png;base64,"));
+    // A text stays a text.
+    let _ = app.close_window(crate::app::Window::Text);
+    let tab = app.db_tabs.get_mut(&path).unwrap();
+    tab.pending.edits.insert((0, 1), Some("hello".to_string()));
+    let _ = app.update(Message::Db(DbMsg::ViewValue(path, 0, 1)));
+    let view = app.db.text.as_ref().unwrap();
+    assert_eq!((view.text.as_str(), view.image.is_none()), ("hello", true));
 }
 
 #[test]

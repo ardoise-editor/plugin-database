@@ -4,7 +4,7 @@
 //! new schema), a text to read whole and the rows a row is linked to.
 
 use ardoise_plugin::ui::{
-    column, fill, footer, image, row, scroll, text, ButtonStyle, Node, TextStyle,
+    column, fill, footer, image, row, scroll, separator, text, ButtonStyle, Node, TextStyle,
 };
 
 use super::Ui;
@@ -79,6 +79,20 @@ pub fn backup_title(b: &crate::database::Backup) -> String {
 
 /// The title of what waits for an answer, in the order `small` shows them.
 pub fn small_title(state: &State) -> String {
+    if state.console.guard.is_some() {
+        return t!("db.guard_title").to_string();
+    }
+    if let Some(s) = &state.search_all {
+        let name = if s.schema.is_empty() {
+            s.database.as_str()
+        } else {
+            s.schema.as_str()
+        };
+        return t!("db.search_all_title", name = name).to_string();
+    }
+    if let Some(c) = &state.compare {
+        return t!("db.compare_title", name = c.schema.as_str()).to_string();
+    }
     if let Some(c) = &state.confirm {
         let name = format!("{}.{}", c.schema, c.table);
         return match c.action {
@@ -523,32 +537,224 @@ fn sql_tab(d: &Designer) -> Node {
 
 // ─── Health ────────────────────────────────────────────────────────────────
 
+/// The word of the statement that cleans a table, in a kind of source.
+fn clean_word(dialect: protocol::Dialect) -> &'static str {
+    match dialect {
+        protocol::Dialect::Mysql => "OPTIMIZE",
+        protocol::Dialect::Duckdb => "CHECKPOINT",
+        _ => "VACUUM",
+    }
+}
+
+/// The statement that cleans a table.
+pub fn clean_statement(dialect: protocol::Dialect, table: &str) -> String {
+    match dialect {
+        protocol::Dialect::Mysql => format!("OPTIMIZE TABLE {table}"),
+        // SQLite cleans the whole file.
+        protocol::Dialect::Sqlite => "VACUUM".to_string(),
+        protocol::Dialect::Duckdb => "CHECKPOINT".to_string(),
+        _ => format!("VACUUM {table}"),
+    }
+}
+
+pub fn analyze_statement(dialect: protocol::Dialect, table: &str) -> String {
+    match dialect {
+        protocol::Dialect::Mysql => format!("ANALYZE TABLE {table}"),
+        _ => format!("ANALYZE {table}"),
+    }
+}
+
+/// The statements that stop what a session runs, or the session.
+pub fn stop_statement(dialect: protocol::Dialect, id: i64, whole: bool) -> String {
+    match (dialect, whole) {
+        (protocol::Dialect::Mysql, false) => format!("KILL QUERY {id}"),
+        (protocol::Dialect::Mysql, true) => format!("KILL {id}"),
+        (_, false) => format!("SELECT pg_cancel_backend({id})"),
+        (_, true) => format!("SELECT pg_terminate_backend({id})"),
+    }
+}
+
+/// The SQL that makes a role, to be changed and run in the console.
+pub fn new_role_statement(dialect: protocol::Dialect) -> String {
+    match dialect {
+        protocol::Dialect::Mysql => {
+            "CREATE USER 'name'@'%' IDENTIFIED BY 'password';\nGRANT SELECT ON shop.* TO 'name'@'%';"
+                .to_string()
+        }
+        _ => "CREATE ROLE name LOGIN PASSWORD 'password';\nGRANT SELECT ON ALL TABLES IN SCHEMA public TO name;"
+            .to_string(),
+    }
+}
+
+/// The SQL that gives a role a right, and the one that drops it.
+pub fn grant_statement(dialect: protocol::Dialect, role: &str) -> String {
+    match dialect {
+        protocol::Dialect::Mysql => format!("GRANT SELECT ON shop.* TO {role};"),
+        _ => format!(
+            "GRANT SELECT ON ALL TABLES IN SCHEMA public TO {};",
+            quote_ident(role)
+        ),
+    }
+}
+
+pub fn drop_role_statement(dialect: protocol::Dialect, role: &str) -> String {
+    match dialect {
+        protocol::Dialect::Mysql => format!("DROP USER {role};"),
+        _ => format!("DROP ROLE {};", quote_ident(role)),
+    }
+}
+
+/// The roles: who may log in, what they may do, and the way to change it.
+fn roles(ui: &mut Ui, view: &HealthView, list: &mut Vec<Node>) {
+    list.push(ui.tool(
+        t!("db.roles_new").to_string(),
+        DbMsg::HealthToConsole(new_role_statement(view.dialect)),
+    ));
+    let Some(all) = &view.roles else {
+        list.push(muted(if view.loading {
+            t!("db.loading").to_string()
+        } else {
+            String::new()
+        }));
+        return;
+    };
+    for r in all {
+        let mut flags = Vec::new();
+        if r.superuser {
+            flags.push(t!("db.roles_superuser").to_string());
+        }
+        if r.create_db {
+            flags.push(t!("db.roles_create_db").to_string());
+        }
+        if r.create_role {
+            flags.push(t!("db.roles_create_role").to_string());
+        }
+        if !r.login {
+            flags.push(t!("db.roles_no_login").to_string());
+        }
+        let mut head = vec![
+            text(r.name.clone()).style(TextStyle::Bold),
+            muted(flags.join(", ")),
+        ];
+        if !r.member_of.is_empty() {
+            head.push(muted(
+                t!("db.roles_member_of", roles = r.member_of.join(", ")).to_string(),
+            ));
+        }
+        head.push(ui.tool(
+            t!("db.roles_grant").to_string(),
+            DbMsg::HealthToConsole(grant_statement(view.dialect, &r.name)),
+        ));
+        head.push(ui.tool(
+            t!("db.roles_drop").to_string(),
+            DbMsg::HealthToConsole(drop_role_statement(view.dialect, &r.name)),
+        ));
+        list.push(row(head).spacing(10.0));
+        if r.grants.is_empty() {
+            list.push(muted(t!("db.roles_no_grants").to_string()));
+        }
+        for g in &r.grants {
+            list.push(text(g.clone()).style(TextStyle::Mono));
+        }
+        list.push(separator());
+    }
+}
+
+/// The monitor: what each session runs, for how long, who blocks it.
+fn sessions(ui: &mut Ui, view: &HealthView, list: &mut Vec<Node>) {
+    let Some(all) = &view.sessions else {
+        list.push(muted(if view.sessions_loading {
+            t!("db.loading").to_string()
+        } else {
+            String::new()
+        }));
+        return;
+    };
+    if all.is_empty() {
+        list.push(muted(t!("db.sessions_none").to_string()));
+        return;
+    }
+    list.push(
+        row([
+            muted(t!("db.sessions_id").to_string()),
+            muted(t!("db.field_user").to_string()),
+            muted(t!("db.field_database").to_string()),
+            muted(t!("db.sessions_state").to_string()),
+            muted(t!("db.sessions_seconds").to_string()),
+            muted(t!("db.sessions_blocked").to_string()),
+            muted(t!("db.sessions_query").to_string()),
+        ])
+        .spacing(10.0),
+    );
+    let free = view.running.is_none();
+    for s in all {
+        let style = if !s.blocked_by.is_empty() || s.slow() {
+            TextStyle::Error
+        } else {
+            TextStyle::Normal
+        };
+        let blocked = s
+            .blocked_by
+            .iter()
+            .map(i64::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let query: String = s.query.split_whitespace().collect::<Vec<_>>().join(" ");
+        let query = if query.chars().count() > 140 {
+            format!("{}…", query.chars().take(140).collect::<String>())
+        } else {
+            query
+        };
+        list.push(
+            row([
+                text(s.id.to_string()),
+                text(s.user.clone()),
+                text(s.database.clone()),
+                text(s.state.clone()).style(style),
+                text(format!("{} s", s.seconds)).style(style),
+                text(blocked).style(TextStyle::Error),
+                text(query).style(TextStyle::Mono),
+                ui.button_if(
+                    t!("db.sessions_stop").to_string(),
+                    free.then(|| DbMsg::HealthRun(stop_statement(view.dialect, s.id, false))),
+                ),
+                ui.button_if(
+                    t!("db.sessions_end").to_string(),
+                    free.then(|| DbMsg::HealthRun(stop_statement(view.dialect, s.id, true))),
+                ),
+            ])
+            .spacing(10.0),
+        );
+    }
+}
+
 pub fn health(ui: &mut Ui, view: &HealthView) -> Node {
     let mut head = Vec::new();
     if let Some(data) = &view.data {
         head.push(muted(human_size(data.database_size)));
     }
     head.push(fill());
-    head.push(
-        ui.icon_tool_if(
-            "refresh-cw",
-            t!("db.refresh").to_string(),
-            (!view.loading && view.running.is_none())
-                .then(|| DbMsg::OpenHealth(view.conn, view.database.clone())),
-        ),
-    );
+    head.push(ui.icon_tool_if(
+        "refresh-cw",
+        t!("db.refresh").to_string(),
+        (!view.loading && view.running.is_none()).then_some(DbMsg::HealthRefresh),
+    ));
     let tabs = ui.tabs(
         "health_tab",
-        &HealthTab::ALL,
+        HealthTab::of(view.dialect),
         view.tab,
         |tab| match tab {
             HealthTab::Tables => t!("db.health_tables").to_string(),
             HealthTab::Indexes => t!("db.health_indexes").to_string(),
+            HealthTab::Sessions => t!("db.health_sessions").to_string(),
+            HealthTab::Roles => t!("db.health_roles").to_string(),
         },
         DbMsg::HealthTab,
     );
     let mut list = Vec::new();
     match (&view.data, view.tab) {
+        (_, HealthTab::Sessions) => sessions(ui, view, &mut list),
+        (_, HealthTab::Roles) => roles(ui, view, &mut list),
         (None, _) => list.push(muted(if view.loading {
             t!("db.loading").to_string()
         } else {
@@ -585,12 +791,16 @@ pub fn health(ui: &mut Ui, view: &HealthView) -> Node {
                         muted(t.last_vacuum.clone()),
                         muted(t.last_analyze.clone()),
                         ui.button_if(
-                            "VACUUM",
-                            free.then(|| DbMsg::HealthRun(format!("VACUUM {qualified}"))),
+                            clean_word(view.dialect),
+                            free.then(|| {
+                                DbMsg::HealthRun(clean_statement(view.dialect, &qualified))
+                            }),
                         ),
                         ui.button_if(
                             "ANALYZE",
-                            free.then(|| DbMsg::HealthRun(format!("ANALYZE {qualified}"))),
+                            free.then(|| {
+                                DbMsg::HealthRun(analyze_statement(view.dialect, &qualified))
+                            }),
                         ),
                     ])
                     .spacing(10.0),
@@ -616,7 +826,11 @@ pub fn health(ui: &mut Ui, view: &HealthView) -> Node {
                     }),
                     text(format!("{}.{}", i.schema, i.table)),
                     text(human_size(i.size)),
-                    text(i.scans.to_string()),
+                    text(if i.scans < 0 {
+                        "–".to_string()
+                    } else {
+                        i.scans.to_string()
+                    }),
                 ];
                 if i.unused() {
                     line.push(text(t!("db.health_unused").to_string()).style(TextStyle::Error));
@@ -978,6 +1192,116 @@ pub fn backup(ui: &mut Ui, b: &crate::database::Backup) -> Node {
 /// What waits for an answer, one at a time (the next shows when this one is
 /// answered): a drop, an SSH key, a new schema, the rows linked, a text.
 pub fn small(ui: &mut Ui, state: &State) -> Node {
+    if let Some(guard) = &state.console.guard {
+        let said = match guard.risk {
+            protocol::Risk::NoWhere => t!("db.guard_no_where").to_string(),
+            protocol::Risk::Writes => t!("db.guard_writes").to_string(),
+            protocol::Risk::Confirm => t!("db.guard_confirm").to_string(),
+        };
+        let style = if guard.risk == protocol::Risk::Confirm {
+            TextStyle::Muted
+        } else {
+            TextStyle::Error
+        };
+        let mut out = vec![text(said).style(style)];
+        for sql in &guard.statements {
+            out.push(text(sql.clone()).style(TextStyle::Mono));
+        }
+        out.push(footer(
+            [],
+            [
+                ui.button(t!("db.guard_cancel").to_string(), DbMsg::GuardCancel),
+                ui.button(t!("db.guard_run").to_string(), DbMsg::GuardRun)
+                    .button_style(ButtonStyle::Primary),
+            ],
+        ));
+        return column(out).spacing(12.0);
+    }
+    if let Some(s) = &state.search_all {
+        let field = ui.input(
+            "search_all_text",
+            &s.text,
+            t!("db.search_all_hint"),
+            DbMsg::SearchAllText,
+        );
+        let mut out = vec![ui.submit(field, DbMsg::SearchAllRun)];
+        if s.running {
+            out.push(muted(t!("db.loading").to_string()));
+        }
+        if let Some(error) = &s.error {
+            out.push(text(error.clone()).style(TextStyle::Error));
+        }
+        match &s.hits {
+            Some(hits) if hits.is_empty() => out.push(muted(t!("db.search_all_none").to_string())),
+            Some(hits) => {
+                let mut list = Vec::new();
+                for (at, hit) in hits.iter().enumerate() {
+                    list.push(
+                        row([
+                            text(format!("{}.{}", hit.schema, hit.table)),
+                            muted(t!("db.search_all_rows", n = hit.count).to_string()),
+                            ui.tool(t!("db.table_open").to_string(), DbMsg::SearchAllShow(at)),
+                        ])
+                        .spacing(10.0),
+                    );
+                }
+                out.push(scroll(column(list).spacing(4.0)).height(280.0));
+            }
+            None => {}
+        }
+        out.push(footer(
+            [],
+            [
+                ui.button(t!("db.close").to_string(), DbMsg::SearchAllClose),
+                ui.button_if(
+                    t!("db.search_all_run").to_string(),
+                    (!s.running && !s.text.trim().is_empty()).then_some(DbMsg::SearchAllRun),
+                )
+                .button_style(ButtonStyle::Primary),
+            ],
+        ));
+        return column(out).spacing(12.0);
+    }
+    if let Some(c) = &state.compare {
+        let labels: Vec<String> = c
+            .choices
+            .iter()
+            .map(|(conn, database, schema)| {
+                let who = state
+                    .connection(*conn)
+                    .map_or_else(String::new, |k| k.label());
+                format!("{who} / {database}.{schema}")
+            })
+            .collect();
+        let chosen = c.picked.and_then(|at| labels.get(at).cloned());
+        let all = labels.clone();
+        let mut out = vec![muted(t!("db.compare_hint").to_string())];
+        if labels.is_empty() {
+            out.push(muted(t!("db.compare_none").to_string()));
+        } else {
+            out.push(ui.select("compare_with", labels, chosen, move |label| {
+                DbMsg::ComparePick(all.iter().position(|l| *l == label).unwrap_or(0))
+            }));
+        }
+        if let Some(error) = &c.error {
+            out.push(text(error.clone()).style(TextStyle::Error));
+        }
+        if c.running {
+            out.push(muted(t!("db.loading").to_string()));
+        }
+        out.push(footer(
+            [],
+            [
+                ui.button(t!("db.guard_cancel").to_string(), DbMsg::CompareClose),
+                ui.button_if(
+                    t!("db.compare_run").to_string(),
+                    (!c.running && c.picked.is_some()).then_some(DbMsg::CompareRun),
+                )
+                .button_style(ButtonStyle::Primary),
+            ],
+        ));
+        return column(out).spacing(12.0);
+    }
     if let Some(c) = &state.confirm {
         let name = format!("{}.{}", c.schema, c.table);
         let (message, action) = match c.action {
@@ -1109,16 +1433,26 @@ pub fn small(ui: &mut Ui, state: &State) -> Node {
         return column(out).spacing(8.0);
     }
     if let Some(view) = &state.text {
+        if let Some(svg) = &view.image {
+            out.push(image(svg.clone()).height(240.0));
+        }
         out.push(scroll(text(view.text.clone()).style(TextStyle::Mono)).height(320.0));
         out.push(muted(
             t!("db.text_size", n = view.text.chars().count()).to_string(),
         ));
+        let mut actions = Vec::new();
+        if view.sql {
+            actions.push(
+                ui.button(t!("db.text_modify").to_string(), DbMsg::TextToConsole)
+                    .button_style(ButtonStyle::Primary),
+            );
+        }
         out.push(footer(
             [
                 ui.icon_tool("copy", t!("db.text_copy").to_string(), DbMsg::TextCopy)
                     .button_style(ButtonStyle::Outline),
             ],
-            [],
+            actions,
         ));
     }
     column(out).spacing(12.0)

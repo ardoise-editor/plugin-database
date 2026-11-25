@@ -558,6 +558,96 @@ impl Engine for Session {
         })
     }
 
+    fn health(&mut self, _request: &Request) -> Result<protocol::Health, String> {
+        let started = std::time::Instant::now();
+        let number = |sql: &str| -> i64 {
+            self.conn
+                .query_row(sql, [], |r| r.get::<_, i64>(0))
+                .unwrap_or(0)
+        };
+        let database_size = number("PRAGMA page_count") * number("PRAGMA page_size");
+        common::record_internal("PRAGMA page_count", started, Some(1), None);
+        // The bytes of each table and index, when the build can tell.
+        let sizes: std::collections::HashMap<String, i64> = (|| -> Result<_, rusqlite::Error> {
+            let mut s = self
+                .conn
+                .prepare("SELECT name, SUM(pgsize) FROM dbstat GROUP BY name")?;
+            let rows = s.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+            rows.collect()
+        })()
+        .unwrap_or_default();
+        let names: Vec<String> = {
+            let mut s = self
+                .conn
+                .prepare(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' \
+                     AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' ORDER BY name LIMIT 500",
+                )
+                .map_err(clean)?;
+            let rows = s.query_map([], |r| r.get::<_, String>(0)).map_err(clean)?;
+            rows.collect::<Result<_, _>>().map_err(clean)?
+        };
+        let mut tables = Vec::new();
+        let mut indexes = Vec::new();
+        for name in names {
+            let rows = self
+                .conn
+                .query_row(&format!("SELECT count(*) FROM {}", quote(&name)), [], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .unwrap_or(0);
+            let mut s = self
+                .conn
+                .prepare(&format!("PRAGMA index_list({})", quote(&name)))
+                .map_err(clean)?;
+            let listed: Vec<(String, bool, String)> = s
+                .query_map([], |r| {
+                    Ok((
+                        r.get::<_, String>(1)?,
+                        r.get::<_, i64>(2)? != 0,
+                        r.get::<_, String>(3)?,
+                    ))
+                })
+                .map_err(clean)?
+                .collect::<Result<_, _>>()
+                .map_err(clean)?;
+            let mut indexes_size = 0;
+            for (index, unique, origin) in listed {
+                let size = sizes.get(&index).copied().unwrap_or(0);
+                indexes_size += size;
+                indexes.push(protocol::IndexHealth {
+                    schema: "main".into(),
+                    table: name.clone(),
+                    name: index,
+                    size,
+                    // SQLite does not count the reads of an index.
+                    scans: -1,
+                    unique,
+                    primary: origin == "pk",
+                });
+            }
+            let table_size = sizes.get(&name).copied().unwrap_or(0);
+            tables.push(protocol::TableHealth {
+                schema: "main".into(),
+                name,
+                rows,
+                table_size,
+                indexes_size,
+                total_size: table_size + indexes_size,
+                dead_rows: 0,
+                last_vacuum: String::new(),
+                last_analyze: String::new(),
+            });
+        }
+        tables.sort_by(|a, b| b.total_size.cmp(&a.total_size).then(a.name.cmp(&b.name)));
+        indexes.sort_by(|a, b| b.size.cmp(&a.size).then(a.name.cmp(&b.name)));
+        Ok(protocol::Health {
+            database_size,
+            tables,
+            indexes,
+        })
+    }
+
     fn definition(&mut self, request: &Request) -> Result<String, String> {
         let name = &request.table;
         let sql: Option<String> = self
@@ -756,6 +846,47 @@ mod tests {
             "the row id is not a column"
         );
         assert_eq!(log["editable"], true);
+    }
+
+    #[test]
+    fn a_file_has_no_other_session_to_list() {
+        let (_dir, path) = database();
+        assert!(call(&path, json!({"op": "sessions"}))
+            .unwrap_err()
+            .contains("not available"));
+        assert!(call(&path, json!({"op": "roles"}))
+            .unwrap_err()
+            .contains("not available"));
+    }
+
+    #[test]
+    fn the_health_of_a_file_lists_its_tables_and_indexes() {
+        let (_dir, path) = database();
+        let health = call(&path, json!({"op": "health"})).unwrap()["health"].clone();
+        assert!(health["database_size"].as_i64().unwrap() > 0);
+        let customers = health["tables"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "customers")
+            .expect("the table is listed");
+        assert_eq!(customers["rows"], 3);
+        let index = health["indexes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["name"] == "items_customer")
+            .expect("the index is listed");
+        // SQLite does not count the reads of an index: not known.
+        assert_eq!(index["scans"], -1);
+        assert_eq!(index["unique"], false);
+        let unique = health["indexes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["name"] == "customers_name")
+            .unwrap();
+        assert_eq!(unique["unique"], true);
     }
 
     #[test]
@@ -1214,9 +1345,5 @@ mod tests {
         assert!(columns
             .iter()
             .any(|c| c.table == "customers" && c.name == "note"));
-        // What this kind of source does not have is said, not guessed.
-        assert!(call(&path, json!({"op": "health"}))
-            .unwrap_err()
-            .contains("not available"));
     }
 }

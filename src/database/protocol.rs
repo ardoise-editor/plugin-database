@@ -23,16 +23,24 @@ pub enum Dialect {
     Sqlite,
     /// MySQL and MariaDB.
     Mysql,
+    /// DuckDB: a file, like SQLite, with the SQL of PostgreSQL.
+    Duckdb,
 }
 
 impl Dialect {
-    pub const ALL: [Dialect; 3] = [Dialect::Postgres, Dialect::Mysql, Dialect::Sqlite];
+    pub const ALL: [Dialect; 4] = [
+        Dialect::Postgres,
+        Dialect::Mysql,
+        Dialect::Sqlite,
+        Dialect::Duckdb,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             Dialect::Postgres => "PostgreSQL",
             Dialect::Sqlite => "SQLite",
             Dialect::Mysql => "MySQL / MariaDB",
+            Dialect::Duckdb => "DuckDB",
         }
     }
 
@@ -42,6 +50,7 @@ impl Dialect {
             Dialect::Postgres => "ardoise-db-postgres",
             Dialect::Sqlite => "ardoise-db-sqlite",
             Dialect::Mysql => "ardoise-db-mysql",
+            Dialect::Duckdb => "ardoise-db-duckdb",
         }
     }
 
@@ -49,7 +58,7 @@ impl Dialect {
         match self {
             Dialect::Postgres => DEFAULT_PORT,
             Dialect::Mysql => DEFAULT_MYSQL_PORT,
-            Dialect::Sqlite => 0,
+            Dialect::Sqlite | Dialect::Duckdb => 0,
         }
     }
 
@@ -383,6 +392,45 @@ impl IndexHealth {
     /// index does that without being read).
     pub fn unused(&self) -> bool {
         self.scans == 0 && !self.unique && !self.primary
+    }
+}
+
+/// A session of the server, as the monitor lists it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionInfo {
+    /// What the server calls it: the number to stop it with.
+    pub id: i64,
+    pub user: String,
+    pub database: String,
+    /// `active`, `idle`, `idle in transaction`…
+    pub state: String,
+    /// Seconds since its statement began (or since it was last asked).
+    pub seconds: i64,
+    pub query: String,
+    /// The sessions it waits for: it is blocked by their locks.
+    pub blocked_by: Vec<i64>,
+}
+
+/// A role (or an account) of the server, and what it may do.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RoleInfo {
+    pub name: String,
+    pub login: bool,
+    pub superuser: bool,
+    pub create_db: bool,
+    pub create_role: bool,
+    /// The roles it belongs to.
+    pub member_of: Vec<String>,
+    /// What it may do, one line each (`schema.table: SELECT, INSERT`).
+    pub grants: Vec<String>,
+}
+
+/// A statement that has run this long (seconds) is slow, in the monitor.
+pub const SLOW_SECONDS: i64 = 5;
+
+impl SessionInfo {
+    pub fn slow(&self) -> bool {
+        self.state == "active" && self.seconds >= SLOW_SECONDS
     }
 }
 
@@ -847,7 +895,7 @@ pub fn sql_tokens(sql: &str, dialect: Dialect) -> Vec<Token> {
                 let escapes = match dialect {
                     Dialect::Mysql => b != b'`',
                     Dialect::Postgres => b == b'\'' && is_escape_string(bytes, start),
-                    Dialect::Sqlite => false,
+                    Dialect::Sqlite | Dialect::Duckdb => false,
                 };
                 i += 1;
                 while i < bytes.len() {
@@ -991,6 +1039,8 @@ pub enum Risk {
     NoWhere,
     /// It changes data or structure, on a source marked as production.
     Writes,
+    /// The source asks to see every statement before it runs.
+    Confirm,
 }
 
 /// Whether an `UPDATE` or `DELETE` (after the `WITH` that may come first) has
@@ -1078,7 +1128,7 @@ pub fn quote_literal_in(dialect: Dialect, value: &str) -> String {
 /// `name` as text, for a search inside the values of any type.
 fn as_text(dialect: Dialect, name: &str) -> String {
     match dialect {
-        Dialect::Postgres => format!("{name}::text"),
+        Dialect::Postgres | Dialect::Duckdb => format!("{name}::text"),
         Dialect::Mysql => format!("CAST({name} AS CHAR)"),
         Dialect::Sqlite => format!("CAST({name} AS TEXT)"),
     }
@@ -1088,7 +1138,9 @@ fn as_text(dialect: Dialect, name: &str) -> String {
 fn like_clause(dialect: Dialect, name: &str, pattern: &str) -> String {
     let pattern = quote_literal_in(dialect, pattern);
     match dialect {
-        Dialect::Postgres => format!("{} ILIKE {pattern}", as_text(dialect, name)),
+        Dialect::Postgres | Dialect::Duckdb => {
+            format!("{} ILIKE {pattern}", as_text(dialect, name))
+        }
         Dialect::Mysql => format!("{} LIKE {pattern}", as_text(dialect, name)),
         // SQLite has no escape character unless told.
         Dialect::Sqlite => format!("{} LIKE {pattern} ESCAPE '\\'", as_text(dialect, name)),

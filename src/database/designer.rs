@@ -252,6 +252,21 @@ pub const COMMON_TYPES: [&str; 22] = [
 pub fn common_types(dialect: Dialect) -> Vec<&'static str> {
     match dialect {
         Dialect::Postgres => COMMON_TYPES.to_vec(),
+        Dialect::Duckdb => vec![
+            "INTEGER",
+            "BIGINT",
+            "SMALLINT",
+            "DECIMAL(10,2)",
+            "DOUBLE",
+            "VARCHAR",
+            "BOOLEAN",
+            "DATE",
+            "TIME",
+            "TIMESTAMP",
+            "UUID",
+            "JSON",
+            "BLOB",
+        ],
         Dialect::Mysql => vec![
             "INT",
             "BIGINT",
@@ -580,6 +595,7 @@ impl Designer {
                     Dialect::Mysql => "INT AUTO_INCREMENT".to_string(),
                     Dialect::Sqlite => "INTEGER".to_string(),
                     Dialect::Postgres => id.kind.clone(),
+                    Dialect::Duckdb => "INTEGER".to_string(),
                 };
             }
         }

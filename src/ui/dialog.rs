@@ -7,7 +7,7 @@ use ardoise_plugin::ui::{column, footer, row, separator, text, ButtonStyle, Node
 use super::{choice, picked, Ui};
 use crate::database::protocol::{Auth, Dialect, SshAuth, SslMode};
 use crate::database::{
-    Choice, DbMsg, Dialog, DialogTab, Driver, Field, Flag, Remember, State, TestState,
+    Choice, DbMsg, Dialog, DialogTab, Driver, Field, Flag, Remember, State, TestState, Tint,
 };
 
 fn tab_label(tab: DialogTab) -> String {
@@ -137,6 +137,10 @@ fn general(ui: &mut Ui, state: &State, dialog: &Dialog) -> Node {
     if dialog.needs_password {
         form.push(text(t!("db.password_needed").to_string()).style(TextStyle::Error));
     }
+    form.push(ui.tool(
+        t!("db.env_import").to_string(),
+        DbMsg::Browse(Field::EnvFile),
+    ));
     // The kind of the data source: three tiles.
     form.push(ui.tiles(
         "dialect",
@@ -145,7 +149,7 @@ fn general(ui: &mut Ui, state: &State, dialog: &Dialog) -> Node {
         |v| v.label().to_string(),
         |v| {
             Some(match v {
-                Dialect::Sqlite => "file",
+                Dialect::Sqlite | Dialect::Duckdb => "file",
                 _ => "database",
             })
         },
@@ -165,8 +169,35 @@ fn general(ui: &mut Ui, state: &State, dialog: &Dialog) -> Node {
         Field::Comment,
         false,
     ));
+    form.push(field(
+        ui,
+        t!("db.field_group").to_string(),
+        &d.group,
+        Field::Group,
+        false,
+    ));
+    form.push(pick(
+        ui,
+        "color",
+        t!("db.field_color").to_string(),
+        &Tint::ALL,
+        d.color,
+        |v| {
+            let name = match v {
+                Tint::None => t!("db.color_none"),
+                Tint::Red => t!("db.color_red"),
+                Tint::Orange => t!("db.color_orange"),
+                Tint::Yellow => t!("db.color_yellow"),
+                Tint::Green => t!("db.color_green"),
+                Tint::Blue => t!("db.color_blue"),
+                Tint::Purple => t!("db.color_purple"),
+            };
+            format!("{} {name}", v.dot()).trim().to_string()
+        },
+        Choice::Tint,
+    ));
     // A SQLite database is a file: nothing else is asked.
-    if d.dialect == Dialect::Sqlite {
+    if matches!(d.dialect, Dialect::Sqlite | Dialect::Duckdb) {
         form.push(file(
             ui,
             t!("db.field_file").to_string(),
@@ -339,6 +370,13 @@ fn options(ui: &mut Ui, dialog: &Dialog) -> Node {
         hint(t!("db.opt_production_hint").to_string()),
         flag(
             ui,
+            t!("db.opt_confirm").to_string(),
+            d.confirm_runs,
+            Flag::ConfirmRuns,
+        ),
+        hint(t!("db.opt_confirm_hint").to_string()),
+        flag(
+            ui,
             t!("db.opt_single").to_string(),
             d.scope.single_database,
             Flag::SingleDatabase,
@@ -445,7 +483,7 @@ fn ssh_ssl(ui: &mut Ui, dialog: &Dialog) -> Node {
         ));
         form.push(hint(t!("db.ssh_hint").to_string()));
     }
-    if d.dialect != Dialect::Sqlite {
+    if !matches!(d.dialect, Dialect::Sqlite | Dialect::Duckdb) {
         form.push(separator());
         form.push(text(t!("db.ssl").to_string()).style(TextStyle::Heading));
         const MODES: [SslMode; 5] = [

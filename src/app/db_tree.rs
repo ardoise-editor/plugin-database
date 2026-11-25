@@ -154,6 +154,8 @@ impl App {
                             self.db.text = Some(TextView {
                                 title: key_name(&key),
                                 text: ddl::table_ddl(&key.2, &key.3, &structure),
+                                sql: true,
+                                image: None,
                             });
                         }
                         for tab in self.db_tabs.values_mut() {
@@ -170,6 +172,8 @@ impl App {
                             self.db.text = Some(TextView {
                                 title: key_name(&key),
                                 text: error,
+                                sql: false,
+                                image: None,
                             });
                         }
                     }
@@ -182,10 +186,50 @@ impl App {
                     self.db.text = Some(TextView {
                         title: key_name(&key),
                         text: ddl::table_ddl(&key.2, &key.3, structure),
+                        sql: true,
+                        image: None,
                     });
                     return Task::none();
                 }
                 self.db_read_structure(key, true)
+            }
+            DbMsg::SeedOpen(conn, database, schema, table) => {
+                let Some(params) = self.db_params(conn, false) else {
+                    return self.db_ask_password(conn);
+                };
+                let key = (conn, database.clone(), schema.clone(), table.clone());
+                let at = TableRef {
+                    database,
+                    schema,
+                    table,
+                };
+                Task::perform(database::structure(params, at), move |done| {
+                    Message::Db(DbMsg::SeedRead(key.clone(), done))
+                })
+            }
+            DbMsg::SeedRead(key, done) => {
+                let log = self.db_log(key.0, &done.executed);
+                match done.result {
+                    Ok(structure) => {
+                        let dialect = self
+                            .db
+                            .connection(key.0)
+                            .map_or_else(Default::default, |c| c.dialect);
+                        let sql = database::seed::insert_rows(
+                            dialect,
+                            &key.2,
+                            &key.3,
+                            &structure,
+                            database::seed::ROWS,
+                        );
+                        self.db.console.append_query(&sql);
+                        self.db.console.save();
+                        self.db.console.tab = database::console::ConsoleTab::Queries;
+                        self.db.console.open = true;
+                    }
+                    Err(error) => self.set_status(error, true),
+                }
+                log
             }
             DbMsg::ShowDefinition(conn, database, schema, name, kind) => {
                 let Some(params) = self.db_params(conn, false) else {
@@ -226,12 +270,15 @@ impl App {
             }
             DbMsg::Definition(conn, _database, schema, name, done) => {
                 let log = self.db_log(conn, &done.executed);
+                let sql = done.result.is_ok();
                 self.db.text = Some(TextView {
                     title: format!("{schema}.{name}"),
                     text: match done.result {
                         Ok(text) => text,
                         Err(error) => error,
                     },
+                    sql,
+                    image: None,
                 });
                 log
             }
@@ -247,12 +294,30 @@ impl App {
                             .get(col)
                             .map(|c| c.name.clone())
                             .unwrap_or_default();
-                        let text = tab
-                            .pending
-                            .value(page, row, col)
-                            .map(readable)
-                            .unwrap_or_default();
-                        self.db.text = Some(TextView { title, text });
+                        let value = tab.pending.value(page, row, col).unwrap_or_default();
+                        // Bytes are shown as bytes: what they are, a dump of
+                        // them, and the picture when they are one.
+                        let (title, text, image) = match database::binary::bytes_of(value) {
+                            Some(bytes) => {
+                                let what = database::binary::kind_of(&bytes)
+                                    .map_or_else(String::new, |(name, _)| format!(", {name}"));
+                                (
+                                    format!(
+                                        "{title} ({}{what})",
+                                        database::protocol::human_size(bytes.len() as i64)
+                                    ),
+                                    database::binary::hex_dump(&bytes),
+                                    database::binary::image_svg(&bytes),
+                                )
+                            }
+                            None => (title, readable(value), None),
+                        };
+                        self.db.text = Some(TextView {
+                            title,
+                            text,
+                            sql: false,
+                            image,
+                        });
                     }
                 }
                 Task::none()
@@ -305,6 +370,16 @@ impl App {
                     &name,
                     tab.dialect,
                 ))
+            }
+            DbMsg::TextToConsole => {
+                if self.db.text.as_ref().is_some_and(|v| v.sql) {
+                    let view = self.db.text.take().expect("checked");
+                    self.db.console.append_query(&view.text);
+                    self.db.console.save();
+                    self.db.console.tab = database::console::ConsoleTab::Queries;
+                    self.db.console.open = true;
+                }
+                Task::none()
             }
             DbMsg::TextCopy => match &self.db.text {
                 Some(view) => crate::task::copy(view.text.clone()),

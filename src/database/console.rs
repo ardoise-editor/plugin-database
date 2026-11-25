@@ -15,6 +15,37 @@ const MAX_LOG: usize = 1000;
 pub enum ConsoleTab {
     Log,
     Queries,
+    Saved,
+}
+
+/// A query kept under a name, for later.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SavedQuery {
+    pub name: String,
+    pub sql: String,
+}
+
+fn saved_file() -> Option<PathBuf> {
+    Some(crate::fsutil::data_dir()?.join("saved_queries.json"))
+}
+
+/// The queries kept, read from their file.
+pub fn load_saved() -> Vec<SavedQuery> {
+    saved_file()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+/// A name for a query that was not given one: its first words.
+pub fn default_name(sql: &str) -> String {
+    let line = sql.split_whitespace().take(6).collect::<Vec<_>>().join(" ");
+    if line.chars().count() > 40 {
+        let cut: String = line.chars().take(40).collect();
+        format!("{cut}…")
+    } else {
+        line
+    }
 }
 
 /// A command that was run, as the log shows it.
@@ -102,6 +133,10 @@ pub struct Console {
     pub editor_focused: bool,
     /// The number the next console is given.
     pub next_doc: usize,
+    /// The queries kept under a name.
+    pub saved: Vec<SavedQuery>,
+    /// The name typed for the query to keep.
+    pub save_name: String,
 }
 
 /// A place of the queries: a line, a column and a length, in characters.
@@ -525,7 +560,49 @@ impl Console {
             error_mark: None,
             editor_focused: false,
             next_doc: 2,
+            saved: load_saved(),
+            save_name: String::new(),
         }
+    }
+
+    /// Writes the queries kept.
+    pub fn save_saved(&self) {
+        let Some(path) = saved_file() else { return };
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Ok(text) = serde_json::to_string_pretty(&self.saved) {
+            let _ = crate::fsutil::write_atomic(&path, text.as_bytes(), true);
+        }
+    }
+
+    /// Keeps what the console would run (the selection or the statement at
+    /// the caret; everything when `all`) under the name typed. Whether
+    /// anything was kept.
+    pub fn keep_query(&mut self) -> bool {
+        let sql = self.statements(false).join(";\n");
+        let sql = if sql.trim().is_empty() {
+            self.editor.text()
+        } else {
+            sql
+        };
+        if sql.trim().is_empty() {
+            return false;
+        }
+        let typed = self.save_name.trim();
+        let name = if typed.is_empty() {
+            default_name(&sql)
+        } else {
+            typed.to_string()
+        };
+        // A name kept twice is a query changed.
+        match self.saved.iter_mut().find(|q| q.name == name) {
+            Some(q) => q.sql = sql,
+            None => self.saved.push(SavedQuery { name, sql }),
+        }
+        self.save_name.clear();
+        self.save_saved();
+        true
     }
 
     /// Keeps what is written for the next time.

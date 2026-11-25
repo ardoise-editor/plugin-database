@@ -8,7 +8,7 @@ use ardoise_plugin::ui::{column, row, scroll, separator, text, Node, TextStyle};
 use super::Ui;
 use crate::app::App;
 use crate::database::console::ConsoleTab;
-use crate::database::{protocol, DbMsg, Driver, LogCopy, Tree};
+use crate::database::{DbMsg, Driver, LogCopy, Tree};
 
 pub fn view(ui: &mut Ui, app: &App) -> Node {
     let state = &app.db;
@@ -27,6 +27,7 @@ pub fn view(ui: &mut Ui, app: &App) -> Node {
             t!("db.console_queries").to_string(),
             ConsoleTab::Queries,
         ),
+        tab(ui, t!("db.console_saved").to_string(), ConsoleTab::Saved),
         tab(ui, t!("db.console_log").to_string(), ConsoleTab::Log),
     ];
     match c.tab {
@@ -110,6 +111,21 @@ pub fn view(ui: &mut Ui, app: &App) -> Node {
                 can_run.then_some(DbMsg::Run(true)),
             ));
         }
+        ConsoleTab::Saved => {
+            header.push(ui.input(
+                "saved_name",
+                &c.save_name,
+                t!("db.saved_name"),
+                DbMsg::SavedName,
+            ));
+            header.push(
+                ui.button_if(
+                    t!("db.saved_keep").to_string(),
+                    (!c.editor.text().trim().is_empty()).then_some(DbMsg::SavedKeep),
+                )
+                .button_style(ardoise_plugin::ui::ButtonStyle::Primary),
+            );
+        }
         ConsoleTab::Log => {
             header.push(ui.input(
                 "log_filter",
@@ -132,6 +148,7 @@ pub fn view(ui: &mut Ui, app: &App) -> Node {
     let content = match c.tab {
         ConsoleTab::Queries => queries(ui, app),
         ConsoleTab::Log => log(ui, app),
+        ConsoleTab::Saved => saved(ui, app),
     };
     column([row(header).spacing(4.0), separator(), content])
         .spacing(4.0)
@@ -182,18 +199,6 @@ fn queries(ui: &mut Ui, app: &App) -> Node {
         line.push(ui.primary(t!("db.bind_run").to_string(), DbMsg::BindRun));
         line.push(ui.tool(t!("db.guard_cancel").to_string(), DbMsg::BindCancel));
         row(line).spacing(6.0)
-    } else if let Some(guard) = &c.guard {
-        let said = match guard.risk {
-            protocol::Risk::NoWhere => t!("db.guard_no_where").to_string(),
-            _ => t!("db.guard_writes").to_string(),
-        };
-        row([
-            text(said).style(TextStyle::Error),
-            ui.button(t!("db.guard_run").to_string(), DbMsg::GuardRun)
-                .button_style(ardoise_plugin::ui::ButtonStyle::Danger),
-            ui.tool(t!("db.guard_cancel").to_string(), DbMsg::GuardCancel),
-        ])
-        .spacing(6.0)
     } else if c.running {
         text(t!("db.console_running").to_string()).style(TextStyle::Muted)
     } else if state.connections.is_empty() {
@@ -220,6 +225,31 @@ fn queries(ui: &mut Ui, app: &App) -> Node {
         );
     }
     column(out).spacing(4.0)
+}
+
+fn saved(ui: &mut Ui, app: &App) -> Node {
+    let c = &app.db.console;
+    if c.saved.is_empty() {
+        return text(t!("db.saved_empty").to_string()).style(TextStyle::Muted);
+    }
+    let mut list = Vec::new();
+    for (at, query) in c.saved.iter().enumerate() {
+        list.push(
+            row([
+                text(query.name.clone()).style(TextStyle::Bold),
+                ui.tool(t!("db.log_reuse").to_string(), DbMsg::SavedUse(at)),
+                ui.icon_tool(
+                    "trash-2",
+                    t!("db.saved_delete").to_string(),
+                    DbMsg::SavedDelete(at),
+                ),
+            ])
+            .spacing(6.0),
+        );
+        list.push(text(query.sql.clone()).style(TextStyle::Mono));
+        list.push(separator());
+    }
+    scroll(column(list).spacing(2.0))
 }
 
 fn log(ui: &mut Ui, app: &App) -> Node {
