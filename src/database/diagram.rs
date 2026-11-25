@@ -3,7 +3,7 @@
 
 use super::protocol::Catalog;
 
-pub const BOX_WIDTH: f32 = 220.0;
+pub const BOX_WIDTH: f32 = 270.0;
 pub const HEADER: f32 = 28.0;
 pub const ROW: f32 = 18.0;
 const GAP_X: f32 = 70.0;
@@ -236,6 +236,24 @@ fn escape(text: &str) -> String {
 }
 
 /// The diagram as an SVG picture, in the colors of the theme.
+/// The fonts of the texts, the first installed one is taken. A generic name
+/// alone is not enough: the renderer reads `sans-serif` as Arial and
+/// `monospace` as Courier New, which many systems lack, and draws no text.
+const SANS: &str = "DejaVu Sans, Liberation Sans, Noto Sans, Arial, Helvetica, sans-serif";
+const MONO: &str =
+    "DejaVu Sans Mono, Liberation Mono, Noto Sans Mono, Menlo, Consolas, Courier New, monospace";
+
+/// The characters of a column's name there is room for, before its type.
+const NAME_CHARS: usize = 16;
+
+/// A name cut to `max` characters, an ellipsis saying so.
+fn short(name: &str, max: usize) -> String {
+    if name.chars().count() <= max {
+        return name.to_string();
+    }
+    name.chars().take(max - 1).chain(['…']).collect()
+}
+
 pub fn svg(d: &Diagram, dark: bool) -> String {
     let (text, muted, accent, elevated, border, soft, background) = if dark {
         (
@@ -247,7 +265,7 @@ pub fn svg(d: &Diagram, dark: bool) -> String {
         )
     };
     let mut out = format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" font-family="sans-serif"><rect width="{w}" height="{h}" fill="{background}"/>"#,
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" font-family="{SANS}"><rect width="{w}" height="{h}" fill="{background}"/>"#,
         w = d.width.max(1.0),
         h = d.height.max(1.0)
     );
@@ -297,12 +315,13 @@ pub fn svg(d: &Diagram, dark: bool) -> String {
                 (false, false) => "",
             };
             let kind: String = c.kind.chars().take(14).collect();
+            let name = short(&c.name, NAME_CHARS);
             out.push_str(&format!(
-                r#"<text x="{}" y="{y}" font-size="10.5" font-family="monospace" fill="{muted}">{mark}</text><text x="{}" y="{y}" font-size="12" font-family="monospace" fill="{}">{}</text><text x="{}" y="{y}" font-size="11" font-family="monospace" fill="{muted}">{}</text>"#,
+                r#"<text x="{}" y="{y}" font-size="10.5" font-family="{MONO}" fill="{muted}">{mark}</text><text x="{}" y="{y}" font-size="12" font-family="{MONO}" fill="{}">{}</text><text x="{}" y="{y}" font-size="11" font-family="{MONO}" fill="{muted}">{}</text>"#,
                 t.x + 8.0,
                 t.x + 46.0,
                 if c.foreign { accent } else { text },
-                escape(&c.name),
+                escape(&name),
                 t.x + BOX_WIDTH - 96.0,
                 escape(&kind)
             ));
@@ -323,6 +342,24 @@ pub fn svg(d: &Diagram, dark: bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_long_column_name_is_cut_before_the_type() {
+        assert_eq!(short("customer_id", NAME_CHARS), "customer_id");
+        let cut = short("a_very_long_column_name", NAME_CHARS);
+        assert_eq!(cut.chars().count(), NAME_CHARS);
+        assert!(cut.ends_with('…'));
+    }
+
+    #[test]
+    fn the_texts_name_fonts_that_are_installed_not_only_a_generic_one() {
+        let drawn = svg(&build(&catalog(), "shop"), true);
+        assert!(drawn.contains(r#"font-family="DejaVu Sans, "#));
+        assert!(drawn.contains(r#"font-family="DejaVu Sans Mono, "#));
+        for generic in ["sans-serif", "monospace"] {
+            assert!(!drawn.contains(&format!(r#"font-family="{generic}""#)));
+        }
+    }
     use crate::database::protocol::{ForeignKey, TableColumn};
 
     fn column(schema: &str, table: &str, name: &str, kind: &str) -> TableColumn {
