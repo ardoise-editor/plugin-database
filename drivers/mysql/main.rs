@@ -521,6 +521,158 @@ impl Engine for Session {
         self.conn.ping().is_ok()
     }
 
+    fn roles(&mut self) -> Result<Vec<protocol::RoleInfo>, String> {
+        let accounts = self.internal(
+            "SELECT user, host FROM mysql.user ORDER BY (user = ''), user, host LIMIT 200",
+        )?;
+        let mut out = Vec::new();
+        for account in &accounts {
+            let who = format!(
+                "{}@{}",
+                literal(&cell(account, 0)),
+                literal(&cell(account, 1))
+            );
+            // What the account may do, as the server writes it; an account
+            // this user may not look at has none listed.
+            let grants: Vec<String> = self
+                .internal(&format!("SHOW GRANTS FOR {who}"))
+                .map(|rows| rows.iter().map(|r| cell(r, 0)).collect())
+                .unwrap_or_default();
+            let all = grants
+                .iter()
+                .any(|g| g.starts_with("GRANT ALL PRIVILEGES ON *.*"));
+            out.push(protocol::RoleInfo {
+                name: who,
+                login: true,
+                superuser: all,
+                create_db: all
+                    || grants
+                        .iter()
+                        .any(|g| g.contains("CREATE") && g.contains(" ON *.*")),
+                create_role: all || grants.iter().any(|g| g.contains("CREATE USER")),
+                member_of: Vec::new(),
+                grants,
+            });
+        }
+        Ok(out)
+    }
+
+    fn sessions(&mut self) -> Result<Vec<protocol::SessionInfo>, String> {
+        let rows = self.internal(
+            "SELECT id, COALESCE(user, ''), COALESCE(db, ''), command, COALESCE(time, 0), \
+                    COALESCE(info, '') \
+             FROM information_schema.processlist \
+             WHERE id <> CONNECTION_ID() AND command <> 'Daemon' ORDER BY (command = 'Sleep'), time DESC LIMIT 300",
+        )?;
+        // Who waits for whom, when the server says (`sys` is not always there).
+        let waits: Vec<Row> = self
+            .internal("SELECT waiting_pid, blocking_pid FROM sys.innodb_lock_waits")
+            .unwrap_or_default();
+        let number = |r: &Row, i: usize| cell(r, i).parse::<i64>().unwrap_or(0);
+        Ok(rows
+            .iter()
+            .map(|r| {
+                let id = number(r, 0);
+                protocol::SessionInfo {
+                    id,
+                    user: cell(r, 1),
+                    database: cell(r, 2),
+                    state: if cell(r, 3) == "Sleep" {
+                        "idle".to_string()
+                    } else {
+                        "active".to_string()
+                    },
+                    seconds: number(r, 4),
+                    query: cell(r, 5),
+                    blocked_by: waits
+                        .iter()
+                        .filter(|w| number(w, 0) == id)
+                        .map(|w| number(w, 1))
+                        .collect(),
+                }
+            })
+            .collect())
+    }
+
+    fn health(&mut self, request: &Request) -> Result<protocol::Health, String> {
+        let database = if request.database.is_empty() {
+            self.current.clone()
+        } else {
+            request.database.clone()
+        };
+        let which = format!("COALESCE(NULLIF({}, ''), DATABASE())", literal(&database));
+        let number = |r: &Row, i: usize| cell(r, i).parse::<i64>().unwrap_or(0);
+        let tables = self.internal(&format!(
+            "SELECT table_schema, table_name, COALESCE(table_rows, 0), \
+                    COALESCE(data_length, 0), COALESCE(index_length, 0) \
+             FROM information_schema.tables \
+             WHERE table_type = 'BASE TABLE' AND table_schema = {which} \
+             ORDER BY COALESCE(data_length, 0) + COALESCE(index_length, 0) DESC, table_name \
+             LIMIT 500"
+        ))?;
+        let tables: Vec<protocol::TableHealth> = tables
+            .iter()
+            .map(|r| protocol::TableHealth {
+                schema: cell(r, 0),
+                name: cell(r, 1),
+                rows: number(r, 2),
+                table_size: number(r, 3),
+                indexes_size: number(r, 4),
+                total_size: number(r, 3) + number(r, 4),
+                dead_rows: 0,
+                last_vacuum: String::new(),
+                last_analyze: String::new(),
+            })
+            .collect();
+        let database_size = tables.iter().map(|t| t.total_size).sum();
+        // The use of each index is kept by the performance schema, and the
+        // size of each by the statistics of InnoDB: either may be off or
+        // out of reach of this user, then it is not known (-1 reads), or 0.
+        let reads: Option<Vec<Row>> = self
+            .internal(&format!(
+                "SELECT object_name, index_name, count_read \
+                 FROM performance_schema.table_io_waits_summary_by_index_usage \
+                 WHERE object_schema = {which} AND index_name IS NOT NULL"
+            ))
+            .ok();
+        let sizes: Vec<Row> = self
+            .internal(&format!(
+                "SELECT table_name, index_name, stat_value * @@innodb_page_size \
+                 FROM mysql.innodb_index_stats \
+                 WHERE database_name = {which} AND stat_name = 'size'"
+            ))
+            .unwrap_or_default();
+        let found = self.internal(&format!(
+            "SELECT table_schema, table_name, index_name, MIN(non_unique) \
+             FROM information_schema.statistics WHERE table_schema = {which} \
+             GROUP BY table_schema, table_name, index_name \
+             ORDER BY table_name, index_name LIMIT 500"
+        ))?;
+        let indexes = found
+            .iter()
+            .map(|r| {
+                let (table, name) = (cell(r, 1), cell(r, 2));
+                let same = |o: &Row| cell(o, 0) == table && cell(o, 1) == name;
+                protocol::IndexHealth {
+                    schema: cell(r, 0),
+                    scans: reads.as_ref().map_or(-1, |all| {
+                        all.iter().find(|o| same(o)).map_or(0, |o| number(o, 2))
+                    }),
+                    size: sizes.iter().find(|o| same(o)).map_or(0, |o| number(o, 2)),
+                    unique: number(r, 3) == 0,
+                    primary: name == "PRIMARY",
+                    table,
+                    name,
+                }
+            })
+            .collect();
+        Ok(protocol::Health {
+            database_size,
+            tables,
+            indexes,
+        })
+    }
+
     fn session_id(&mut self) -> Option<i64> {
         Some(i64::from(self.conn.connection_id()))
     }
@@ -932,6 +1084,19 @@ mod tests {
         let csv = std::fs::read_to_string(&out).unwrap();
         assert!(csv.starts_with("id,name,note\n"));
         let _ = std::fs::remove_file(out);
+        // The monitor lists the other sessions of the server.
+        assert!(call(json!({"op": "sessions"})).unwrap()["sessions"].is_array());
+        // The health of the database: its tables, and what is known of
+        // their indexes.
+        let health = call(json!({"op": "health", "database": db})).unwrap()["health"].clone();
+        let tables = health["tables"].as_array().unwrap();
+        assert!(tables.iter().any(|t| t["name"] == "se_people"));
+        assert!(health["database_size"].as_i64().unwrap() > 0);
+        assert!(health["indexes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|i| i["table"] == "se_people" && i["primary"] == true));
         call(json!({"op": "query", "statements": ["DROP TABLE se_items", "DROP TABLE se_people"]}))
             .unwrap();
     }

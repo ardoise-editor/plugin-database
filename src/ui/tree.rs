@@ -54,7 +54,10 @@ pub fn view(ui: &mut Ui, app: &App) -> Node {
     let hit = |name: &str| !filtering || name.to_lowercase().contains(&needle);
     let is_open = |key: &str| filtering || state.open.contains(key);
     let picked = state.tree_picked.clone();
-    let mut roots: Vec<TreeItem> = Vec::new();
+    // What stands at the top: a data source, or the folder of a group (its
+    // place in `folders`).
+    let mut slots: Vec<Result<TreeItem, usize>> = Vec::new();
+    let mut folders: Vec<(String, Vec<TreeItem>)> = Vec::new();
     for connection in &state.connections {
         let id = connection.id;
         let key = id.to_string();
@@ -251,7 +254,34 @@ pub fn view(ui: &mut Ui, app: &App) -> Node {
             .tree_item(connection.label(), DbMsg::Picked(Picked::Connection(id)))
             .icon("⛃");
         ui.on_toggle(&line, DbMsg::Toggle(key.clone()));
-        roots.push(line.expandable().expanded(open).children(children));
+        let item = line.expandable().expanded(open).children(children);
+        // A data source of a group goes into the folder of that name.
+        let group = connection.group.trim();
+        if group.is_empty() {
+            slots.push(Ok(item));
+        } else if let Some(at) = folders.iter().position(|(name, _)| name == group) {
+            folders[at].1.push(item);
+        } else {
+            folders.push((group.to_string(), vec![item]));
+            // The folder stands where its first data source was.
+            slots.push(Err(folders.len() - 1));
+        }
+    }
+    let mut folders: Vec<Option<(String, Vec<TreeItem>)>> = folders.into_iter().map(Some).collect();
+    let mut roots: Vec<TreeItem> = Vec::new();
+    for slot in slots {
+        match slot {
+            Ok(item) => roots.push(item),
+            Err(at) => {
+                let Some((name, items)) = folders[at].take() else {
+                    continue;
+                };
+                let key = format!("group:{name}");
+                let line = ui.tree_item(name, DbMsg::Toggle(key.clone())).icon("📁");
+                ui.on_toggle(&line, DbMsg::Toggle(key.clone()));
+                roots.push(line.expandable().expanded(is_open(&key)).children(items));
+            }
+        }
     }
     let filter = ui.input(
         "tree_filter",
@@ -299,6 +329,10 @@ fn actions(ui: &mut Ui, app: &App, picked: &Picked) -> Node {
                 DbMsg::NewSchema(id, database.clone()),
             ));
             out.push(ui.tool(
+                t!("db.search_all").to_string(),
+                DbMsg::SearchAllOpen(id, database.clone(), String::new()),
+            ));
+            out.push(ui.tool(
                 t!("db.health").to_string(),
                 DbMsg::OpenHealth(id, database.clone()),
             ));
@@ -323,6 +357,14 @@ fn actions(ui: &mut Ui, app: &App, picked: &Picked) -> Node {
             out.push(ui.tool(
                 t!("db.new_schema").to_string(),
                 DbMsg::NewSchema(id, database.clone()),
+            ));
+            out.push(ui.tool(
+                t!("db.compare").to_string(),
+                DbMsg::CompareOpen(id, database.clone(), schema.clone()),
+            ));
+            out.push(ui.tool(
+                t!("db.search_all").to_string(),
+                DbMsg::SearchAllOpen(id, database.clone(), schema.clone()),
             ));
             out.push(ui.tool(
                 t!("db.health").to_string(),
@@ -359,6 +401,10 @@ fn actions(ui: &mut Ui, app: &App, picked: &Picked) -> Node {
                 out.push(ui.tool(
                     t!("db.import").to_string(),
                     DbMsg::ImportOpen(a, b.clone(), c.clone(), d.clone()),
+                ));
+                out.push(ui.tool(
+                    t!("db.seed").to_string(),
+                    DbMsg::SeedOpen(a, b.clone(), c.clone(), d.clone()),
                 ));
                 out.push(ui.tool(
                     t!("db.copy_table").to_string(),

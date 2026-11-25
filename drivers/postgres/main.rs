@@ -296,6 +296,8 @@ fn run(input: &str, slot: &mut Option<(String, Session)>, serving: bool) -> Resu
         "health" => health(client, &request),
         "structure" => structure(client, &request),
         "definition" => definition(client, &request),
+        "sessions" => sessions(client),
+        "roles" => roles(client),
         "cancel" => {
             // From another connection: the statement stops on the server, which
             // is the only way on servers that don't watch their clients.
@@ -2452,6 +2454,88 @@ fn restore(request: &Request, tunnel_port: Option<u16>) -> Result<Value, String>
 
 /// How the database is doing: the size of its tables and indexes, what waits
 /// to be cleaned, and the indexes nobody reads.
+/// The roles of the server, whose they are members, and what they may do with
+/// the tables.
+fn roles(client: &mut Client) -> Result<Value, String> {
+    let rows = internal_query(
+        client,
+        "SELECT r.rolname::text, r.rolcanlogin, r.rolsuper, r.rolcreatedb, r.rolcreaterole, \
+                COALESCE((SELECT array_agg(g.rolname::text ORDER BY g.rolname) \
+                          FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid \
+                          WHERE m.member = r.oid), ARRAY[]::text[]) \
+         FROM pg_roles r WHERE r.rolname !~ '^pg_' ORDER BY r.rolcanlogin DESC, r.rolname \
+         LIMIT 300",
+        &[],
+    )
+    .map_err(clean)?;
+    let grants = internal_query(
+        client,
+        "SELECT grantee::text, table_schema::text || '.' || table_name::text, \
+                string_agg(privilege_type::text, ', ' ORDER BY privilege_type::text) \
+         FROM information_schema.role_table_grants \
+         WHERE table_schema NOT IN ('pg_catalog', 'information_schema') \
+         GROUP BY grantee, table_schema, table_name \
+         ORDER BY grantee, table_schema, table_name LIMIT 3000",
+        &[],
+    )
+    .map_err(clean)?;
+    let list: Vec<protocol::RoleInfo> = rows
+        .iter()
+        .map(|r| {
+            let name: String = r.get(0);
+            protocol::RoleInfo {
+                login: r.get(1),
+                superuser: r.get(2),
+                create_db: r.get(3),
+                create_role: r.get(4),
+                member_of: r.get::<_, Vec<String>>(5),
+                grants: grants
+                    .iter()
+                    .filter(|g| g.get::<_, String>(0) == name)
+                    .map(|g| format!("{}: {}", g.get::<_, String>(1), g.get::<_, String>(2)))
+                    .collect(),
+                name,
+            }
+        })
+        .collect();
+    Ok(json!({ "roles": list }))
+}
+
+/// The sessions of the server: what each runs, for how long, and who blocks it.
+fn sessions(client: &mut Client) -> Result<Value, String> {
+    let rows = internal_query(
+        client,
+        "SELECT pid::bigint, COALESCE(usename, '')::text, COALESCE(datname, '')::text, \
+                COALESCE(state, '')::text, \
+                COALESCE(EXTRACT(EPOCH FROM (now() - COALESCE(query_start, state_change)))::bigint, 0), \
+                COALESCE(query, '')::text, \
+                COALESCE(array_to_string(pg_blocking_pids(pid), ','), '')::text \
+         FROM pg_stat_activity \
+         WHERE pid <> pg_backend_pid() AND backend_type = 'client backend' \
+         ORDER BY (state = 'active') DESC, COALESCE(query_start, state_change) NULLS LAST \
+         LIMIT 300",
+        &[],
+    )
+    .map_err(clean)?;
+    let list: Vec<protocol::SessionInfo> = rows
+        .iter()
+        .map(|r| protocol::SessionInfo {
+            id: r.get(0),
+            user: r.get(1),
+            database: r.get(2),
+            state: r.get(3),
+            seconds: r.get(4),
+            query: r.get(5),
+            blocked_by: r
+                .get::<_, String>(6)
+                .split(',')
+                .filter_map(|p| p.trim().parse().ok())
+                .collect(),
+        })
+        .collect();
+    Ok(json!({ "sessions": list }))
+}
+
 fn health(client: &mut Client, request: &Request) -> Result<Value, String> {
     let user_schemas = "($1 OR (n.nspname NOT IN ('pg_catalog', 'information_schema') \
                          AND n.nspname NOT LIKE 'pg\\_toast%' AND n.nspname NOT LIKE 'pg\\_temp%'))";

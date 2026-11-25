@@ -99,13 +99,21 @@ impl App {
             Window::Backup => db.backup.take().is_some(),
             Window::Text => {
                 if db.new_schema.as_ref().is_some_and(|n| n.running)
+                    || db.compare.as_ref().is_some_and(|c| c.running)
+                    || db.search_all.as_ref().is_some_and(|s| s.running)
                     || db.confirm.as_ref().is_some_and(|c| c.running)
                 {
                     return false;
                 }
                 // One section shows at a time (see `ui::admin::small`): the
                 // one in front is closed, the next one shows.
-                if db.confirm.is_some() {
+                if db.console.guard.is_some() {
+                    db.console.guard = None;
+                } else if db.search_all.is_some() {
+                    db.search_all = None;
+                } else if db.compare.is_some() {
+                    db.compare = None;
+                } else if db.confirm.is_some() {
                     db.confirm = None;
                 } else if db.ssh_trust.is_some() {
                     db.ssh_trust = None;

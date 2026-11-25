@@ -471,6 +471,9 @@ pub fn window_head(app: &App, id: &str) -> (&'static str, String) {
             ("archive-restore", t!("db.sub_restore").to_string())
         }
         BACKUP => ("hard-drive-download", t!("db.sub_backup").to_string()),
+        TEXT if db.console.guard.is_some() => ("shield-question", t!("db.sub_guard").to_string()),
+        TEXT if db.compare.is_some() => ("git-compare", t!("db.sub_compare").to_string()),
+        TEXT if db.search_all.is_some() => ("search", t!("db.sub_search_all").to_string()),
         TEXT if db.confirm.is_some() => ("trash-2", t!("db.sub_confirm").to_string()),
         TEXT if db.ssh_trust.is_some() => ("key-round", t!("db.sub_ssh").to_string()),
         TEXT if db.new_schema.is_some() => ("folder-plus", t!("db.sub_schema").to_string()),
@@ -537,6 +540,9 @@ fn windows(app: &App) -> Vec<(&'static str, String, bool)> {
             TEXT,
             admin::small_title(db),
             db.text.is_some()
+                || db.console.guard.is_some()
+                || db.compare.is_some()
+                || db.search_all.is_some()
                 || db.links.is_some()
                 || db.new_schema.is_some()
                 || db.confirm.is_some()

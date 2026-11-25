@@ -12,8 +12,16 @@ impl App {
     pub(super) fn db_tools_message(&mut self, msg: DbMsg) -> Task<Message> {
         match msg {
             DbMsg::OpenHealth(conn, database) => {
+                let dialect = self
+                    .db
+                    .connection(conn)
+                    .map_or_else(Default::default, |c| c.dialect);
                 self.db.health = Some(HealthView {
                     conn,
+                    dialect,
+                    sessions: None,
+                    sessions_loading: false,
+                    roles: None,
                     database,
                     data: None,
                     loading: true,
@@ -42,7 +50,216 @@ impl App {
                 if let Some(view) = self.db.health.as_mut() {
                     view.tab = tab;
                 }
+                if tab == HealthTab::Sessions {
+                    return self.db_sessions_load();
+                }
+                if tab == HealthTab::Roles {
+                    return self.db_roles_load();
+                }
                 Task::none()
+            }
+            DbMsg::CompareOpen(conn, database, schema) => {
+                let mut choices = Vec::new();
+                for connection in &self.db.connections {
+                    if let Some(database::Tree::Loaded(databases)) =
+                        self.db.trees.get(&connection.id)
+                    {
+                        for d in databases {
+                            for s in &d.schemas {
+                                if connection.id == conn && d.name == database && s.name == schema {
+                                    continue;
+                                }
+                                choices.push((connection.id, d.name.clone(), s.name.clone()));
+                            }
+                        }
+                    }
+                }
+                self.db.compare = Some(database::Compare {
+                    conn,
+                    database,
+                    schema,
+                    picked: (!choices.is_empty()).then_some(0),
+                    choices,
+                    running: false,
+                    error: None,
+                });
+                Task::none()
+            }
+            DbMsg::ComparePick(at) => {
+                if let Some(c) = self.db.compare.as_mut().filter(|c| !c.running) {
+                    c.picked = Some(at).filter(|a| *a < c.choices.len());
+                }
+                Task::none()
+            }
+            DbMsg::CompareClose => {
+                if self.db.compare.as_ref().is_some_and(|c| !c.running) {
+                    self.db.compare = None;
+                }
+                Task::none()
+            }
+            DbMsg::CompareRun => {
+                let Some(c) = self.db.compare.as_ref().filter(|c| !c.running) else {
+                    return Task::none();
+                };
+                let Some((tconn, tdatabase, tschema)) =
+                    c.picked.and_then(|at| c.choices.get(at).cloned())
+                else {
+                    return Task::none();
+                };
+                let (sconn, sdatabase, sschema) = (c.conn, c.database.clone(), c.schema.clone());
+                let (Some(source), Some(target)) =
+                    (self.db_params(sconn, false), self.db_params(tconn, false))
+                else {
+                    return self.db_ask_password(sconn);
+                };
+                let dialect = self
+                    .db
+                    .connection(tconn)
+                    .map_or_else(Default::default, |k| k.dialect);
+                if let Some(c) = self.db.compare.as_mut() {
+                    c.running = true;
+                    c.error = None;
+                }
+                Task::perform(
+                    async move {
+                        let first = database::table_columns(source, sdatabase).await.result?;
+                        let second = database::table_columns(target, tdatabase).await.result?;
+                        Ok(database::compare::migration(
+                            dialect,
+                            &first.columns,
+                            &sschema,
+                            &second.columns,
+                            &tschema,
+                        ))
+                    },
+                    |done| Message::Db(DbMsg::Compared(done)),
+                )
+            }
+            DbMsg::Compared(done) => {
+                let Some(c) = self.db.compare.as_mut() else {
+                    return Task::none();
+                };
+                c.running = false;
+                match done {
+                    Ok(sql) if sql.trim().is_empty() => {
+                        c.error = Some(t!("db.compare_same").to_string())
+                    }
+                    Ok(sql) => {
+                        let title = t!("db.compare_result").to_string();
+                        self.db.compare = None;
+                        self.db.text = Some(database::TextView {
+                            title,
+                            text: sql,
+                            sql: true,
+                            image: None,
+                        });
+                    }
+                    Err(error) => c.error = Some(error),
+                }
+                Task::none()
+            }
+            DbMsg::SearchAllOpen(conn, database, schema) => {
+                self.db.search_all = Some(database::SearchAll {
+                    conn,
+                    database,
+                    schema,
+                    text: String::new(),
+                    running: false,
+                    hits: None,
+                    error: None,
+                });
+                Task::none()
+            }
+            DbMsg::SearchAllText(text) => {
+                if let Some(s) = self.db.search_all.as_mut().filter(|s| !s.running) {
+                    s.text = text;
+                }
+                Task::none()
+            }
+            DbMsg::SearchAllClose => {
+                if self.db.search_all.as_ref().is_some_and(|s| !s.running) {
+                    self.db.search_all = None;
+                }
+                Task::none()
+            }
+            DbMsg::SearchAllRun => {
+                let Some(s) = self
+                    .db
+                    .search_all
+                    .as_ref()
+                    .filter(|s| !s.running && !s.text.trim().is_empty())
+                else {
+                    return Task::none();
+                };
+                let (conn, database, schema, text) =
+                    (s.conn, s.database.clone(), s.schema.clone(), s.text.clone());
+                let Some(params) = self.db_params(conn, false) else {
+                    return self.db_ask_password(conn);
+                };
+                if let Some(s) = self.db.search_all.as_mut() {
+                    s.running = true;
+                    s.error = None;
+                    s.hits = None;
+                }
+                Task::perform(
+                    database::search_all(params, database, schema, text),
+                    |done| Message::Db(DbMsg::SearchAllDone(done)),
+                )
+            }
+            DbMsg::SearchAllDone(done) => {
+                if let Some(s) = self.db.search_all.as_mut() {
+                    s.running = false;
+                    match done {
+                        Ok(hits) => s.hits = Some(hits),
+                        Err(error) => s.error = Some(error),
+                    }
+                }
+                Task::none()
+            }
+            DbMsg::SearchAllShow(at) => {
+                let Some(s) = self.db.search_all.take() else {
+                    return Task::none();
+                };
+                let Some(hit) = s.hits.as_ref().and_then(|h| h.get(at)).cloned() else {
+                    self.db.search_all = Some(s);
+                    return Task::none();
+                };
+                self.db_open_table_with(s.conn, s.database, hit.schema, hit.table, Some(hit.filter))
+            }
+            DbMsg::HealthRefresh => {
+                let sessions = self.db_sessions_load();
+                let roles = self.db_roles_load();
+                Task::batch([self.db_health_load(), sessions, roles])
+            }
+            DbMsg::RolesLoaded(done) => {
+                let conn = self.db.health.as_ref().map(|h| h.conn);
+                let log = conn.map_or_else(Task::none, |c| self.db_log(c, &done.executed));
+                if let Some(view) = self.db.health.as_mut() {
+                    view.loading = false;
+                    match done.result {
+                        Ok(list) => {
+                            view.roles = Some(list);
+                            view.error = None;
+                        }
+                        Err(error) => view.error = Some(error),
+                    }
+                }
+                log
+            }
+            DbMsg::SessionsLoaded(done) => {
+                let conn = self.db.health.as_ref().map(|h| h.conn);
+                let log = conn.map_or_else(Task::none, |c| self.db_log(c, &done.executed));
+                if let Some(view) = self.db.health.as_mut() {
+                    view.sessions_loading = false;
+                    match done.result {
+                        Ok(list) => {
+                            view.sessions = Some(list);
+                            view.error = None;
+                        }
+                        Err(error) => view.error = Some(error),
+                    }
+                }
+                log
             }
             DbMsg::HealthRun(statement) => {
                 let Some((conn, database)) = self
@@ -79,7 +296,11 @@ impl App {
                 view.running = None;
                 match failure {
                     // The numbers are read again: what was cleaned shows.
-                    None => Task::batch([log, self.db_health_load()]),
+                    None => {
+                        let sessions = self.db_sessions_load();
+                        let roles = self.db_roles_load();
+                        Task::batch([log, self.db_health_load(), sessions, roles])
+                    }
                     Some(error) => {
                         view.error = Some(error);
                         log
@@ -658,6 +879,60 @@ impl App {
             Err(error) => im.error = Some(error),
         }
         Task::none()
+    }
+
+    /// Reads the roles of the server, if their tab is the one on show.
+    fn db_roles_load(&mut self) -> Task<Message> {
+        let Some((conn, database)) = self
+            .db
+            .health
+            .as_ref()
+            .filter(|h| h.tab == HealthTab::Roles)
+            .map(|h| (h.conn, h.database.clone()))
+        else {
+            return Task::none();
+        };
+        let Some(params) = self.db_params(conn, false) else {
+            self.db.health = None;
+            return self.db_ask_password(conn);
+        };
+        if let Some(view) = self.db.health.as_mut() {
+            view.loading = true;
+        }
+        let window = database::AnswerFor::Health(conn, database.clone());
+        Task::perform(database::roles(params, database), move |done| {
+            Message::Db(DbMsg::Answer(
+                window.clone(),
+                Box::new(DbMsg::RolesLoaded(done)),
+            ))
+        })
+    }
+
+    /// Reads the sessions of the server, if their tab is the one on show.
+    fn db_sessions_load(&mut self) -> Task<Message> {
+        let Some((conn, database)) = self
+            .db
+            .health
+            .as_ref()
+            .filter(|h| h.tab == HealthTab::Sessions)
+            .map(|h| (h.conn, h.database.clone()))
+        else {
+            return Task::none();
+        };
+        let Some(params) = self.db_params(conn, false) else {
+            self.db.health = None;
+            return self.db_ask_password(conn);
+        };
+        if let Some(view) = self.db.health.as_mut() {
+            view.sessions_loading = true;
+        }
+        let window = database::AnswerFor::Health(conn, database.clone());
+        Task::perform(database::sessions(params, database), move |done| {
+            Message::Db(DbMsg::Answer(
+                window.clone(),
+                Box::new(DbMsg::SessionsLoaded(done)),
+            ))
+        })
     }
 
     /// Reads the numbers of the database the health window is about.

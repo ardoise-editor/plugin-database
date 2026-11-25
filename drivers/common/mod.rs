@@ -87,6 +87,18 @@ pub trait Engine {
     fn session_id(&mut self) -> Option<i64> {
         None
     }
+    /// The roles of the server and their privileges.
+    fn roles(&mut self) -> Result<Vec<protocol::RoleInfo>, String> {
+        Err("roles are not available for this kind of data source".to_string())
+    }
+    /// The sessions of the server, for the monitor.
+    fn sessions(&mut self) -> Result<Vec<protocol::SessionInfo>, String> {
+        Err("sessions are not available for this kind of data source".to_string())
+    }
+    /// Sizes, and how the indexes are used: for the health window.
+    fn health(&mut self, _request: &Request) -> Result<protocol::Health, String> {
+        Err("health is not available for this kind of data source".to_string())
+    }
     /// Stops the statement the session `id` runs: whether there was one.
     fn cancel(&mut self, _id: i64) -> Result<bool, String> {
         Ok(false)
@@ -264,10 +276,9 @@ fn answer(engine: &mut dyn Engine, request: &Request) -> Result<Value, String> {
             }
             restore(engine, request)
         }
-        "health" => Err(format!(
-            "{} is not available for this kind of data source",
-            request.op
-        )),
+        "health" => Ok(json!({ "health": engine.health(request)? })),
+        "sessions" => Ok(json!({ "sessions": engine.sessions()? })),
+        "roles" => Ok(json!({ "roles": engine.roles()? })),
         other => Err(format!("unknown operation: {other}")),
     }
 }
@@ -614,7 +625,7 @@ fn dump(engine: &mut dyn Engine, request: &Request) -> Result<Value, String> {
     let (off, on) = match request.target.dialect {
         protocol::Dialect::Sqlite => ("PRAGMA foreign_keys = OFF;", "PRAGMA foreign_keys = ON;"),
         protocol::Dialect::Mysql => ("SET FOREIGN_KEY_CHECKS = 0;", "SET FOREIGN_KEY_CHECKS = 1;"),
-        protocol::Dialect::Postgres => ("", ""),
+        protocol::Dialect::Postgres | protocol::Dialect::Duckdb => ("", ""),
     };
     if !off.is_empty() {
         writeln!(out, "{off}").map_err(write_err)?;
