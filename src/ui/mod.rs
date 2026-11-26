@@ -5,7 +5,7 @@
 pub mod admin;
 pub mod console;
 pub mod dialog;
-mod table;
+pub mod table;
 pub mod tree;
 
 use std::collections::HashMap;

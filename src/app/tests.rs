@@ -2432,3 +2432,28 @@ fn removing_the_plugin_with_its_data_takes_the_passwords_out_of_the_keychain() {
         assert_eq!(secrets::load(id, secrets::SSH), None);
     }
 }
+
+#[test]
+fn the_pending_changes_are_counted_in_words_that_agree() {
+    use crate::database::DbMsg;
+    let (mut app, path) = db_app(true);
+    let shown = |app: &App| {
+        let mut ui = crate::ui::Ui::new(false);
+        let node = crate::ui::table::view(&mut ui, &path, &app.db_tabs[&path]);
+        serde_json::to_string(&node).unwrap()
+    };
+    let one = t!("db.pending_one").to_string();
+    let none = t!("db.pending", n = 0).to_string();
+    // A cell being typed in: nothing waits yet, so nothing is counted.
+    let _ = app.update(Message::Db(DbMsg::Edit(path.clone(), 1, 1)));
+    let typing = shown(&app);
+    assert!(!typing.contains(&none) && !typing.contains(&one));
+    assert!(typing.contains(t!("db.revert").as_ref()));
+    let _ = app.update(Message::Db(DbMsg::EditInput(path.clone(), "x".into())));
+    let _ = app.update(Message::Db(DbMsg::EditCommit(path.clone())));
+    assert!(shown(&app).contains(&one));
+    let _ = app.update(Message::Db(DbMsg::Edit(path.clone(), 2, 1)));
+    let _ = app.update(Message::Db(DbMsg::EditInput(path.clone(), "y".into())));
+    let _ = app.update(Message::Db(DbMsg::EditCommit(path.clone())));
+    assert!(shown(&app).contains(t!("db.pending", n = 2).as_ref()));
+}

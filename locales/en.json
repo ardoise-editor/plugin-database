@@ -263,6 +263,7 @@
   "db.password_needed": "Enter the password to connect.",
   "db.pending": "%{n} pending changes",
   "db.pending_block": "Commit or revert the pending changes first.",
+  "db.pending_one": "1 pending change",
   "db.pick_date": "Pick a date…",
   "db.preview": "Preview",
   "db.preview_hint": "All of it in one transaction, in this order.",

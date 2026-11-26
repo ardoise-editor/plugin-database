@@ -203,7 +203,15 @@ pub fn view(ui: &mut Ui, path: &Path, tab: &TableTab) -> Node {
     }
     let pending = tab.pending.count();
     if pending > 0 || tab.editing.is_some() {
-        bar.push(text(t!("db.pending", n = pending).to_string()).style(TextStyle::Bold));
+        // Nothing is counted while the first cell is still being typed in.
+        if pending > 0 {
+            let count = if pending == 1 {
+                t!("db.pending_one")
+            } else {
+                t!("db.pending", n = pending)
+            };
+            bar.push(text(count.to_string()).style(TextStyle::Bold));
+        }
         bar.push(ui.tool(t!("db.revert").to_string(), DbMsg::RevertAll(owned())));
         bar.push(ui.tool(t!("db.preview").to_string(), DbMsg::Preview(owned(), true)));
         bar.push(ui.button_if(
