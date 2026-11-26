@@ -263,6 +263,7 @@
   "db.password_needed": "Saisissez le mot de passe pour vous connecter.",
   "db.pending": "%{n} modifications en attente",
   "db.pending_block": "Validez ou annulez d'abord les modifications en attente.",
+  "db.pending_one": "1 modification en attente",
   "db.pick_date": "Choisir une date…",
   "db.preview": "Aperçu",
   "db.preview_hint": "Le tout dans une seule transaction, dans cet ordre.",
